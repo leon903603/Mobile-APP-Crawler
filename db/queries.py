@@ -40,7 +40,11 @@ def insert_app(
                 VALUES (%s, %s, %s, %s, %s, %s)
                 ON CONFLICT (store, app_id) DO UPDATE SET
                     app_name = EXCLUDED.app_name,
-                    category = EXCLUDED.category,
+                    category = CASE
+                        WHEN apps.category IS NULL OR apps.category = 'Unknown'
+                        THEN EXCLUDED.category
+                        ELSE apps.category
+                    END,
                     country  = EXCLUDED.country
                 RETURNING id
             """, (developer_id, store, app_id, app_name, category, country))
