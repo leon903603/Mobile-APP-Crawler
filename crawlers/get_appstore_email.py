@@ -109,54 +109,39 @@ def _scrape_email_from_website(url: str) -> str | None:
 # ──────────────────────────────────────────────
 
 def _fetch_unenriched_devs(limit: int) -> list[tuple[int, str]]:
-    """
-    Pull developers who have a website but no email yet.
-    Returns list of (id, website) tuples.
-    """
-    conn = get_connection()
-    cur = conn.cursor()
-    cur.execute("""
-        SELECT id, website
-        FROM developers
-        WHERE email IS NULL
-          AND website IS NOT NULL
-          AND website != ''
-        LIMIT %s
-    """, (limit,))
-    rows = cur.fetchall()
-    cur.close()
-    conn.close()
-    return rows
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT id, website
+                FROM developers
+                WHERE email IS NULL
+                  AND website IS NOT NULL
+                  AND website != ''
+                LIMIT %s
+            """, (limit,))
+            return cur.fetchall()
 
 
 def _update_developer_email(dev_id: int, email: str) -> None:
-    conn = get_connection()
-    cur = conn.cursor()
-    cur.execute("""
-        UPDATE developers
-        SET email = %s
-        WHERE id = %s AND email IS NULL
-    """, (email, dev_id))
-    conn.commit()
-    cur.close()
-    conn.close()
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                UPDATE developers
+                SET email = %s
+                WHERE id = %s AND email IS NULL
+            """, (email, dev_id))
+        conn.commit()
 
 
 def _mark_developer_no_email(dev_id: int) -> None:
-    """
-    Mark developer as checked but no email found.
-    Uses a sentinel value so we don't retry them on every run.
-    """
-    conn = get_connection()
-    cur = conn.cursor()
-    cur.execute("""
-        UPDATE developers
-        SET email = 'not_found'
-        WHERE id = %s AND email IS NULL
-    """, (dev_id,))
-    conn.commit()
-    cur.close()
-    conn.close()
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                UPDATE developers
+                SET email = 'not_found'
+                WHERE id = %s AND email IS NULL
+            """, (dev_id,))
+        conn.commit()
 
 
 # ──────────────────────────────────────────────
