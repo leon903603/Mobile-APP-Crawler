@@ -1,51 +1,65 @@
 import os
 import random
 import re
-import requests
 import time
+import threading
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from playwright.sync_api import sync_playwright
+
 from db.connection import get_connection
 
 # ──────────────────────────────────────────────
 # Config
 # ──────────────────────────────────────────────
 
-MAX_WORKERS = 10
+MAX_WORKERS = 5  # each worker launches a Chromium instance (~150 MB each)
 WAIT_MIN = 0.5
 WAIT_MAX = 1.5
-BATCH_SIZE = 500  # how many devs to pull from DB per iteration
+BATCH_SIZE = 500
+JS_RENDER_WAIT = 1000  # ms to wait after DOM load for JS to finish rendering
 
 _proxy_host = os.environ.get("PROXY_HOST")
 _proxy_port = os.environ.get("PROXY_PORT", "8118")
-PROXIES = (
-    {
-        "http":  f"http://{_proxy_host}:{_proxy_port}",
-        "https": f"http://{_proxy_host}:{_proxy_port}",
-    }
+_PROXY = (
+    {"server": f"http://{_proxy_host}:{_proxy_port}"}
     if _proxy_host else None
 )
 
-HEADERS = {
-    "User-Agent": (
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/124.0.0.0 Safari/537.36"
-    )
-}
+_USER_AGENT = (
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/124.0.0.0 Safari/537.36"
+)
 
-# Domains commonly found in HTML that are not real developer emails
 EMAIL_BLACKLIST = {
     "example.com", "domain.com", "email.com", "test.com",
     "sentry.io", "sentry-next.io", "bugsnag.com",
     "wix.com", "squarespace.com", "wordpress.com",
     "amazonaws.com", "cloudfront.net", "fastly.net",
     "apple.com", "google.com", "facebook.com",
-    "2x.png", "3x.png",  # catches image filenames that look like emails
+    "2x.png", "3x.png",
 }
 
-# Pages to try beyond the root URL — devs often put contact info here
 CONTACT_PATHS = ["", "/contact", "/contact-us", "/support", "/about", "/privacy"]
+
+
+# ──────────────────────────────────────────────
+# Thread-local Playwright browser
+# ──────────────────────────────────────────────
+
+_local = threading.local()
+
+
+def _get_browser():
+    """One Playwright + Chromium instance per worker thread, reused across calls."""
+    if not hasattr(_local, "playwright"):
+        _local.playwright = sync_playwright().start()
+        _local.browser = _local.playwright.chromium.launch(
+            headless=True,
+            proxy=_PROXY,
+        )
+    return _local.browser
 
 
 # ──────────────────────────────────────────────
@@ -53,53 +67,60 @@ CONTACT_PATHS = ["", "/contact", "/contact-us", "/support", "/about", "/privacy"
 # ──────────────────────────────────────────────
 
 def _extract_emails(text: str) -> list[str]:
-    """Pull all email addresses from raw HTML/text, filtered against blacklist."""
     raw = re.findall(r"[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}", text)
-    seen = set()
-    results = []
+
+    # catch obfuscated patterns: user [at] domain [dot] com
+    for match in re.findall(
+        r"[a-zA-Z0-9._%+\-]+\s*[\[\(]at[\]\)]\s*[a-zA-Z0-9.\-]+\s*[\[\(]dot[\]\)]\s*[a-zA-Z]{2,}",
+        text, re.IGNORECASE,
+    ):
+        normalized = re.sub(r"\s*[\[\(]at[\]\)]\s*", "@", match, flags=re.IGNORECASE)
+        normalized = re.sub(r"\s*[\[\(]dot[\]\)]\s*", ".", normalized, flags=re.IGNORECASE)
+        raw.append(normalized)
+
+    seen: set[str] = set()
+    results: list[str] = []
     for email in raw:
         email = email.lower().strip(".")
         domain = email.split("@")[-1]
-        if domain in EMAIL_BLACKLIST:
-            continue
-        if email in seen:
+        if domain in EMAIL_BLACKLIST or email in seen:
             continue
         seen.add(email)
         results.append(email)
     return results
 
 
+# ──────────────────────────────────────────────
+# Email scraping
+# ──────────────────────────────────────────────
+
 def _scrape_email_from_website(url: str) -> str | None:
-    """
-    Try root URL + common contact paths. Return first valid email found.
-    Tries /contact, /support, /about before giving up.
-    """
     if not url:
         return None
 
-    # Normalise — strip trailing slash
     base = url.rstrip("/")
+    browser = _get_browser()
+    context = browser.new_context(user_agent=_USER_AGENT)
 
-    for path in CONTACT_PATHS:
-        target = base + path
-        try:
-            time.sleep(random.uniform(WAIT_MIN, WAIT_MAX))
-            resp = requests.get(
-                target,
-                headers=HEADERS,
-                timeout=10,
-                proxies=PROXIES,
-                allow_redirects=True,
-            )
-            if resp.status_code != 200:
+    try:
+        for path in CONTACT_PATHS:
+            target = base + path
+            page = context.new_page()
+            try:
+                time.sleep(random.uniform(WAIT_MIN, WAIT_MAX))
+                resp = page.goto(target, timeout=15000, wait_until="domcontentloaded")
+                if not resp or resp.status != 200:
+                    continue
+                page.wait_for_timeout(JS_RENDER_WAIT)
+                emails = _extract_emails(page.content())
+                if emails:
+                    return emails[0]
+            except Exception:
                 continue
-
-            emails = _extract_emails(resp.text)
-            if emails:
-                return emails[0]  # take first valid hit
-
-        except Exception:
-            continue  # dead link, timeout, SSL error — move on
+            finally:
+                page.close()
+    finally:
+        context.close()
 
     return None
 

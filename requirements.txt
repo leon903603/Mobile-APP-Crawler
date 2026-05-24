@@ -4,3 +4,4 @@ requests==2.32.5
 psycopg2-binary==2.9.11
 matplotlib==3.10.8
 SQLAlchemy==2.0.48
+playwright==1.52.0
