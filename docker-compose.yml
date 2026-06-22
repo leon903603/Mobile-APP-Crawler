@@ -276,6 +276,37 @@ services:
       crawler_net:
         ipv4_address: 172.28.0.18
 
+  # ── Email enrichment (one-shot batch job) ───────────────────────────────────
+  tor-enrich:
+    image: dperson/torproxy
+    restart: unless-stopped
+    profiles: [enrich]
+    networks:
+      crawler_net:
+        ipv4_address: 172.28.0.29
+
+  email-enrich:
+    build: .
+    profiles: [enrich]
+    environment:
+      - DB_HOST=db
+      - DB_PORT=5432
+      - DB_NAME=appcrawler
+      - DB_USER=crawler
+      - DB_PASS=crawlerpass
+      - PROXY_HOST=tor-enrich
+      - PROXY_PORT=8118
+      - PYTHONUNBUFFERED=1
+    command: sh -c "sleep 30 && python -u crawlers/get_appstore_email.py"
+    depends_on:
+      db:
+        condition: service_healthy
+      tor-enrich:
+        condition: service_started
+    networks:
+      crawler_net:
+        ipv4_address: 172.28.0.20
+
   # ── Database ─────────────────────────────────────────────────────────────────
   db:
     image: postgres:16
