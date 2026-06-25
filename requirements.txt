@@ -1,4 +1,4 @@
-pandas==3.0.1
+pandas==2.3.3
 google-play-scraper==1.2.7
 requests==2.32.5
 psycopg2-binary==2.9.11
