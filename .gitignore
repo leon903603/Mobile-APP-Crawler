@@ -4,3 +4,4 @@ venv/
 *.png
 appcrawler.dump
 config.json
+ads/
