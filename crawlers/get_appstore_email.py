@@ -50,16 +50,41 @@ CONTACT_PATHS = ["", "/contact", "/contact-us", "/support", "/about", "/privacy"
 
 _local = threading.local()
 
+# Every (playwright, browser) we launch is tracked here so it can be closed on
+# shutdown. Without this, Chromium subprocesses are orphaned when their worker
+# thread dies and leak indefinitely.
+_browsers: list = []
+_browsers_lock = threading.Lock()
+
 
 def _get_browser():
     """One Playwright + Chromium instance per worker thread, reused across calls."""
-    if not hasattr(_local, "playwright"):
-        _local.playwright = sync_playwright().start()
-        _local.browser = _local.playwright.chromium.launch(
+    if not hasattr(_local, "browser"):
+        playwright = sync_playwright().start()
+        browser = playwright.chromium.launch(
             headless=True,
             proxy=_PROXY,
         )
+        _local.playwright = playwright
+        _local.browser = browser
+        with _browsers_lock:
+            _browsers.append((playwright, browser))
     return _local.browser
+
+
+def _shutdown_browsers() -> None:
+    """Close every Chromium/Playwright instance we launched."""
+    with _browsers_lock:
+        for playwright, browser in _browsers:
+            try:
+                browser.close()
+            except Exception:
+                pass
+            try:
+                playwright.stop()
+            except Exception:
+                pass
+        _browsers.clear()
 
 
 # ──────────────────────────────────────────────
@@ -181,18 +206,23 @@ def _enrich_developer(dev_id: int, website: str) -> tuple[int, str | None]:
 def enrich_developer_emails() -> None:
     print("[ENRICHMENT] Starting developer email enrichment...")
 
-    while True:
-        devs = _fetch_unenriched_devs(BATCH_SIZE)
+    # One executor for the whole run: worker threads (and their thread-local
+    # Chromium instances) are reused across batches instead of being recreated
+    # — and leaked — every iteration.
+    executor = ThreadPoolExecutor(max_workers=MAX_WORKERS)
+    try:
+        while True:
+            devs = _fetch_unenriched_devs(BATCH_SIZE)
 
-        if not devs:
-            print("[ENRICHMENT] No unenriched developers remaining. Done.")
-            break
+            if not devs:
+                print("[ENRICHMENT] No unenriched developers remaining. Done.")
+                break
 
-        print(f"[ENRICHMENT] Processing batch of {len(devs)} developers...")
-        found = 0
-        not_found = 0
+            print(f"[ENRICHMENT] Processing batch of {len(devs)} developers...")
+            found = 0
+            not_found = 0
+            errors = 0
 
-        with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
             futures = {
                 executor.submit(_enrich_developer, dev_id, website): dev_id
                 for dev_id, website in devs
@@ -209,11 +239,23 @@ def enrich_developer_emails() -> None:
                         _mark_developer_no_email(dev_id)
                         not_found += 1
                 except Exception as e:
+                    errors += 1
                     print(f"  [ERROR] dev {dev_id}: {e}")
 
-        print(f"[BATCH DONE] found: {found} | not found: {not_found}")
+            print(f"[BATCH DONE] found: {found} | not found: {not_found} | errors: {errors}")
 
-    print("[ENRICHMENT] Complete.")
+            # Progress guard: every developer normally ends up marked found or
+            # not_found, which removes it from the next fetch. If a whole batch
+            # only errored (e.g. DB writes failing), the same rows are fetched
+            # forever — a tight infinite loop that floods the logs. Bail instead.
+            if found == 0 and not_found == 0:
+                print("[ENRICHMENT] Batch made no progress (all writes failed); aborting.")
+                break
+
+        print("[ENRICHMENT] Complete.")
+    finally:
+        executor.shutdown(wait=True)
+        _shutdown_browsers()
 
 
 if __name__ == "__main__":
