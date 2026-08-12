@@ -1,8 +1,18 @@
+# Shared log-rotation policy. Without this, Docker's default json-file driver
+# grows unbounded — a crash-looping or runaway container can fill the host disk
+# (it once wrote a single 304GB log file here). Cap every service's logs.
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "20m"
+    max-file: "5"
+
 services:
 
   # ── Tor proxies — App Store ──────────────────────────────────────────────────
   tor-as-americas:
     image: dperson/torproxy
+    logging: *default-logging
     restart: unless-stopped
     profiles: [app_store]
     networks:
@@ -11,6 +21,7 @@ services:
 
   tor-as-europe:
     image: dperson/torproxy
+    logging: *default-logging
     restart: unless-stopped
     profiles: [app_store]
     networks:
@@ -19,6 +30,7 @@ services:
 
   tor-as-asia-pacific:
     image: dperson/torproxy
+    logging: *default-logging
     restart: unless-stopped
     profiles: [app_store]
     networks:
@@ -27,6 +39,7 @@ services:
 
   tor-as-africa-me:
     image: dperson/torproxy
+    logging: *default-logging
     restart: unless-stopped
     profiles: [app_store]
     networks:
@@ -36,6 +49,7 @@ services:
   # ── Tor proxies — Google Play ────────────────────────────────────────────────
   tor-gp-americas:
     image: dperson/torproxy
+    logging: *default-logging
     restart: unless-stopped
     profiles: [google_play]
     networks:
@@ -44,6 +58,7 @@ services:
 
   tor-gp-europe:
     image: dperson/torproxy
+    logging: *default-logging
     restart: unless-stopped
     profiles: [google_play]
     networks:
@@ -52,6 +67,7 @@ services:
 
   tor-gp-asia-pacific:
     image: dperson/torproxy
+    logging: *default-logging
     restart: unless-stopped
     profiles: [google_play]
     networks:
@@ -60,6 +76,7 @@ services:
 
   tor-gp-africa-me:
     image: dperson/torproxy
+    logging: *default-logging
     restart: unless-stopped
     profiles: [google_play]
     networks:
@@ -69,6 +86,7 @@ services:
   # ── App Store crawlers ───────────────────────────────────────────────────────
   as-americas:
     build: .
+    logging: *default-logging
     profiles: [app_store]
     environment:
       - CRAWLER_TYPE=app_store
@@ -94,6 +112,7 @@ services:
 
   as-europe:
     build: .
+    logging: *default-logging
     profiles: [app_store]
     environment:
       - CRAWLER_TYPE=app_store
@@ -119,6 +138,7 @@ services:
 
   as-asia-pacific:
     build: .
+    logging: *default-logging
     profiles: [app_store]
     environment:
       - CRAWLER_TYPE=app_store
@@ -144,6 +164,7 @@ services:
 
   as-africa-me:
     build: .
+    logging: *default-logging
     profiles: [app_store]
     environment:
       - CRAWLER_TYPE=app_store
@@ -170,6 +191,7 @@ services:
   # ── Google Play crawlers ─────────────────────────────────────────────────────
   gp-americas:
     build: .
+    logging: *default-logging
     profiles: [google_play]
     environment:
       - CRAWLER_TYPE=google_play
@@ -197,6 +219,7 @@ services:
 
   gp-europe:
     build: .
+    logging: *default-logging
     profiles: [google_play]
     environment:
       - CRAWLER_TYPE=google_play
@@ -224,6 +247,7 @@ services:
 
   gp-asia-pacific:
     build: .
+    logging: *default-logging
     profiles: [google_play]
     environment:
       - CRAWLER_TYPE=google_play
@@ -251,6 +275,7 @@ services:
 
   gp-africa-me:
     build: .
+    logging: *default-logging
     profiles: [google_play]
     environment:
       - CRAWLER_TYPE=google_play
@@ -279,6 +304,7 @@ services:
   # ── Email enrichment (one-shot batch job) ───────────────────────────────────
   tor-enrich:
     image: dperson/torproxy
+    logging: *default-logging
     restart: unless-stopped
     profiles: [enrich]
     networks:
@@ -287,6 +313,7 @@ services:
 
   email-enrich:
     build: .
+    logging: *default-logging
     profiles: [enrich]
     environment:
       - DB_HOST=db
@@ -311,6 +338,7 @@ services:
   # ── Database ─────────────────────────────────────────────────────────────────
   db:
     image: postgres:16
+    logging: *default-logging
     environment:
       POSTGRES_DB: appcrawler
       POSTGRES_USER: crawler
