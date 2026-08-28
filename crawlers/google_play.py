@@ -219,3 +219,25 @@ def worker():
         t.start()
     for t in threads:
         t.join()
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# download_apk(prototype, can be revised)
+# ──────────────────────────────────────────────────────────────────────────────
+def _fetch_app(app_id: str, country: str) -> dict | None:
+    # 1. 抓 metadata
+    app_info = gplay_app(app_id, lang="en", country=country)
+    
+    # 2. 寫入 DB
+    app_db_id = _insert_app(app_info, country)
+    
+    # 3. 下載 APK ← 在這裡！
+    version = app_info.get("version")
+    apk_path = _download_apk(app_id, version)
+    
+    # 4. 新增 scan_reports 任務（告訴 Scanner 有 APK 可以檢測了）
+    insert_scan_task(
+        app_db_id=app_db_id,
+        version=version,
+        apk_path=apk_path  # ← 告訴 Scanner APK 在哪裡
+    )

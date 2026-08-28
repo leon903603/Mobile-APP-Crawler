@@ -27,7 +27,7 @@ def get_developer_apps(limit=10, country=None):
                     SELECT d.email, a.store
                     FROM developers d
                     JOIN apps a ON a.developer_id = d.id
-                    WHERE d.email IS NOT NULL
+                    WHERE d.email IS NOT NULL AND d.email <> 'not_found'
                     AND a.country = %s
                     LIMIT %s
                 """, (country, limit))
@@ -36,7 +36,7 @@ def get_developer_apps(limit=10, country=None):
                     SELECT d.email, a.store
                     FROM developers d
                     JOIN apps a ON a.developer_id = d.id
-                    WHERE d.email IS NOT NULL
+                    WHERE d.email IS NOT NULL AND d.email <> 'not_found'
                     LIMIT %s
                 """, (limit,))
 
