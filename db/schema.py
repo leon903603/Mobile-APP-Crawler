@@ -81,6 +81,48 @@ def create_tables():
                         WHERE status = 'pending'
                 """)
 
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS scan_reports (
+                        id           SERIAL PRIMARY KEY,
+                        app_db_id    INTEGER REFERENCES apps(id),
+                        version      TEXT,
+                        apk_path     TEXT,
+                        report_path  TEXT,
+                        excerpt_path TEXT,
+                        status       TEXT        NOT NULL DEFAULT 'pending',  -- pending / running / done / dead
+                        retries      INTEGER     NOT NULL DEFAULT 0,
+                        last_error   TEXT,
+                        locked_at    TIMESTAMPTZ,
+                        updated_at   TIMESTAMPTZ DEFAULT NOW(),
+                        created_at   TIMESTAMPTZ DEFAULT NOW(),
+                        UNIQUE (app_db_id, version)
+                    )
+                """)
+
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS email_log (
+                        id             SERIAL PRIMARY KEY,
+                        developer_id   INTEGER REFERENCES developers(id),
+                        email          TEXT NOT NULL,
+                        scan_report_id INTEGER REFERENCES scan_reports(id),
+                        status         TEXT NOT NULL DEFAULT 'sent',  -- sent / failed / dry_run
+                        error          TEXT,
+                        sent_at        TIMESTAMPTZ DEFAULT NOW(),
+                        UNIQUE (email, scan_report_id)
+                    )
+                """)
+
+                cur.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_scan_reports_queue
+                        ON scan_reports (status, id)
+                        WHERE status = 'pending'
+                """)
+
+                cur.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_email_log_lookup
+                        ON email_log (email, scan_report_id, status)
+                """)
+
                 conn.commit()
 
             finally:

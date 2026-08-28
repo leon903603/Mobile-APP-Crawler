@@ -335,6 +335,30 @@ services:
       crawler_net:
         ipv4_address: 172.28.0.20
 
+  # ── Scanner Worker ──────────────────────────────────────────────────────────
+  scanner:
+    build: .
+    logging: *default-logging
+    profiles: [scanner]
+    environment:
+      - CRAWLER_TYPE=scanner
+      - SCAN_WORKERS=2
+      - DB_POOL_SIZE=4
+      - DB_HOST=db
+      - DB_PORT=5432
+      - DB_NAME=appcrawler
+      - DB_USER=crawler
+      - DB_PASS=crawlerpass
+      - PYTHONUNBUFFERED=1
+      - PYTHONPATH=/app
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      crawler_net:
+        ipv4_address: 172.28.0.19
+
   # ── Database ─────────────────────────────────────────────────────────────────
   db:
     image: postgres:16

@@ -1,119 +1,216 @@
 import os
 import smtplib
 import json
-from collections import defaultdict
-from email.mime.text import MIMEText
+import time
+import random
+import argparse
 from email.message import EmailMessage
 from db.connection import get_connection
 
 
 # ──────────────────────────────────────────────
-# Config (use env vars)
+# Config (env vars with config.json fallback)
 # ──────────────────────────────────────────────
-with open("config.json") as f:
-    config = json.load(f)
-GMAIL_USER = config.get("email_user")
-GMAIL_APP_PASSWORD = config.get("email_password")
+def _load_credentials():
+    gmail_user = os.environ.get("GMAIL_USER") or os.environ.get("EMAIL_USER")
+    gmail_password = os.environ.get("GMAIL_APP_PASSWORD") or os.environ.get("EMAIL_PASSWORD")
+
+    if (not gmail_user or not gmail_password) and os.path.exists("config.json"):
+        try:
+            with open("config.json") as f:
+                config = json.load(f)
+                gmail_user = gmail_user or config.get("email_user")
+                gmail_password = gmail_password or config.get("email_password")
+        except Exception as e:
+            print(f"[WARN] Could not load config.json: {e}")
+
+    return gmail_user, gmail_password
 
 
 # ──────────────────────────────────────────────
-# Fetch emails from DB
+# Fetch scan reports ready for emailing from DB
 # ──────────────────────────────────────────────
-def get_developer_apps(limit=10, country=None):
+def get_pending_report_emails(limit: int = 10, country: str = None) -> list[tuple]:
+    """
+    Fetch done scan reports for developers who have a valid email,
+    excluding NULL and 'not_found', and excluding already sent reports in email_log.
+    """
     with get_connection() as conn:
         with conn.cursor() as cur:
+            query = """
+                SELECT
+                    d.id            AS developer_id,
+                    d.name          AS developer_name,
+                    d.email         AS developer_email,
+                    a.id            AS app_db_id,
+                    a.app_id        AS app_id,
+                    a.app_name      AS app_name,
+                    a.store         AS store,
+                    sr.id           AS scan_report_id,
+                    sr.version      AS version,
+                    sr.excerpt_path AS excerpt_path
+                FROM scan_reports sr
+                JOIN apps a ON sr.app_db_id = a.id
+                JOIN developers d ON a.developer_id = d.id
+                WHERE d.email IS NOT NULL
+                  AND d.email <> 'not_found'
+                  AND d.email <> ''
+                  AND sr.status = 'done'
+                  AND sr.excerpt_path IS NOT NULL
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM email_log el
+                      WHERE el.email = d.email
+                        AND el.scan_report_id = sr.id
+                        AND el.status = 'sent'
+                  )
+            """
+            params = []
             if country:
-                cur.execute("""
-                    SELECT d.email, a.store
-                    FROM developers d
-                    JOIN apps a ON a.developer_id = d.id
-                    WHERE d.email IS NOT NULL AND d.email <> 'not_found'
-                    AND a.country = %s
-                    LIMIT %s
-                """, (country, limit))
-            else:
-                cur.execute("""
-                    SELECT d.email, a.store
-                    FROM developers d
-                    JOIN apps a ON a.developer_id = d.id
-                    WHERE d.email IS NOT NULL AND d.email <> 'not_found'
-                    LIMIT %s
-                """, (limit,))
+                query += " AND a.country = %s"
+                params.append(country)
 
-            rows = cur.fetchall()
-    return rows
+            query += " ORDER BY sr.id ASC LIMIT %s"
+            params.append(limit)
+
+            cur.execute(query, tuple(params))
+            return cur.fetchall()
+
+
+# ──────────────────────────────────────────────
+# Log email sending status
+# ──────────────────────────────────────────────
+def log_email_result(developer_id: int, email: str, scan_report_id: int, status: str, error: str = None):
+    """
+    Records sending status in email_log table to prevent duplicate emails.
+    """
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO email_log (developer_id, email, scan_report_id, status, error)
+                VALUES (%s, %s, %s, %s, %s)
+                ON CONFLICT (email, scan_report_id) DO UPDATE SET
+                    status  = EXCLUDED.status,
+                    error   = EXCLUDED.error,
+                    sent_at = NOW()
+            """, (developer_id, email, scan_report_id, status, error))
+            conn.commit()
 
 
 # ──────────────────────────────────────────────
 # Send email via Gmail SMTP
 # ──────────────────────────────────────────────
-def send_email(to_email, pdf_paths):
+def send_report_email(
+    to_email: str,
+    developer_name: str,
+    app_name: str,
+    excerpt_path: str,
+    gmail_user: str,
+    gmail_password: str,
+    dry_run: bool = False
+):
+    """
+    Sends personalized scan report excerpt PDF to developer.
+    """
+    if dry_run:
+        print(f"[DRY-RUN] Would send report for '{app_name}' to {to_email} (attachment: {excerpt_path})")
+        return
+
+    if not gmail_user or not gmail_password:
+        raise ValueError("Missing email_user or email_password credentials")
+
     msg = EmailMessage()
-    msg["Subject"] = "Mobile app analysis services"
-    msg["From"] = GMAIL_USER
+    msg["Subject"] = f"Mobile App Analysis Report: {app_name}"
+    msg["From"] = gmail_user
     msg["To"] = to_email
 
-    msg.set_content("Please find the attached analysis catalog of our service.")
+    body = (
+        f"Dear {developer_name},\n\n"
+        f"Please find attached the analysis report excerpt for your application '{app_name}'.\n\n"
+        "Best regards,\nMobile App Security & Analysis Team"
+    )
+    msg.set_content(body)
 
-    for path in pdf_paths:
-        with open(path, "rb") as f:
+    if excerpt_path and os.path.exists(excerpt_path):
+        with open(excerpt_path, "rb") as f:
             pdf_data = f.read()
 
+        filename = os.path.basename(excerpt_path)
         msg.add_attachment(
             pdf_data,
             maintype="application",
             subtype="pdf",
-            filename=path.split("/")[-1]
+            filename=filename
         )
+    else:
+        raise FileNotFoundError(f"Excerpt PDF not found: {excerpt_path}")
 
     with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
-        server.login(GMAIL_USER, GMAIL_APP_PASSWORD)
+        server.login(gmail_user, gmail_password)
         server.send_message(msg)
 
-    print(f"[+] Sent to {to_email}")
+    print(f"[+] Sent report for '{app_name}' to {to_email}")
 
 
 # ──────────────────────────────────────────────
 # Main
 # ──────────────────────────────────────────────
-IOS_PDF = "ios_static_capability_catalog.pdf"
-ANDROID_PDF = "android_static_capability_catalog.pdf"
-
 def main():
-    if not GMAIL_USER or not GMAIL_APP_PASSWORD:
-        raise Exception("Missing email_user or email_password in config.json")
+    parser = argparse.ArgumentParser(description="Send app analysis report excerpts to developers")
+    parser.add_argument("--dry-run", action="store_true", help="Simulate email sending without contacting SMTP")
+    parser.add_argument("--limit", type=int, default=10, help="Maximum number of emails to send (default: 10)")
+    parser.add_argument("--country", type=str, default=None, help="Filter by country code (e.g. tw)")
+    args = parser.parse_args()
 
-    rows = get_developer_apps(limit=10, country="tw")
+    gmail_user, gmail_password = _load_credentials()
+
+    if not args.dry_run and (not gmail_user or not gmail_password):
+        raise ValueError("Missing email_user or email_password in environment or config.json (use --dry-run to test)")
+
+    rows = get_pending_report_emails(limit=args.limit, country=args.country)
 
     if not rows:
-        print("[!] No emails found")
+        print("[i] No pending scan reports to send")
         return
 
-    # Group stores by email so each developer gets one email
-    grouped = defaultdict(set)
-    for email, store in rows:
-        grouped[email].add(store)
+    print(f"[i] Found {len(rows)} report(s) to send (dry_run={args.dry_run}, limit={args.limit}, country={args.country})...")
 
-    print(f"[i] Sending to {len(grouped)} developers...")
+    for row in rows:
+        dev_id, dev_name, email, app_db_id, app_id, app_name, store, scan_report_id, version, excerpt_path = row
 
-    for email, stores in grouped.items():
         try:
-            pdfs = []
+            send_report_email(
+                to_email=email,
+                developer_name=dev_name,
+                app_name=app_name,
+                excerpt_path=excerpt_path,
+                gmail_user=gmail_user,
+                gmail_password=gmail_password,
+                dry_run=args.dry_run
+            )
 
-            if "app_store" in stores:
-                pdfs.append(IOS_PDF)
-
-            if "google_play" in stores:
-                pdfs.append(ANDROID_PDF)
-
-            if not pdfs:
-                print(f"[!] No valid store for {email}")
-                continue
-
-            send_email(email, pdfs)
+            status = "dry_run" if args.dry_run else "sent"
+            log_email_result(
+                developer_id=dev_id,
+                email=email,
+                scan_report_id=scan_report_id,
+                status=status
+            )
 
         except Exception as e:
-            print(f"[!] Failed for {email}: {e}")
+            print(f"[!] Failed for {email} ({app_name}): {e}")
+            log_email_result(
+                developer_id=dev_id,
+                email=email,
+                scan_report_id=scan_report_id,
+                status="failed",
+                error=str(e)
+            )
+
+        # Rate limiting: 3 to 5 seconds per email
+        delay = random.uniform(3.0, 5.0)
+        print(f"[i] Rate limit delay: {delay:.2f}s...")
+        time.sleep(delay)
 
 
 if __name__ == "__main__":

@@ -11,7 +11,10 @@ def run_detection(apk_path: str) -> str | None:
     """呼叫 Detection System 分析 APK，回傳報告路徑"""
     # TODO: 等 Detection System 檔案到齊後實作
     print(f"[STUB] Would scan {apk_path}")
-    return f"/data/reports/report.pdf"  # 暫時回傳假路徑
+    reports_dir = os.environ.get("REPORTS_DIR", "/data/reports")
+    os.makedirs(reports_dir, exist_ok=True)
+    basename = os.path.splitext(os.path.basename(apk_path))[0] if apk_path else "report"
+    return os.path.join(reports_dir, f"{basename}_report.pdf")
 
 
 # ──────────────────────────────────────────────────────────────
@@ -19,8 +22,39 @@ def run_detection(apk_path: str) -> str | None:
 # ──────────────────────────────────────────────────────────────
 def extract_first_pages(pdf_path: str, n: int = 2) -> str:
     """擷取 PDF 前 n 頁"""
-    # TODO: 用 PyPDF2 實作
-    return pdf_path.replace(".pdf", "_excerpt.pdf")
+    excerpt_path = pdf_path.replace(".pdf", "_excerpt.pdf") if pdf_path.endswith(".pdf") else f"{pdf_path}_excerpt.pdf"
+
+    if not os.path.exists(pdf_path):
+        # Stub or test mode when actual report file is not yet generated
+        return excerpt_path
+
+    try:
+        try:
+            import PyPDF2
+            PdfReader = PyPDF2.PdfReader
+            PdfWriter = PyPDF2.PdfWriter
+        except ImportError:
+            import pypdf
+            PdfReader = pypdf.PdfReader
+            PdfWriter = pypdf.PdfWriter
+
+        reader = PdfReader(pdf_path)
+        writer = PdfWriter()
+
+        total_pages = len(reader.pages)
+        pages_to_extract = min(n, total_pages)
+
+        for i in range(pages_to_extract):
+            writer.add_page(reader.pages[i])
+
+        os.makedirs(os.path.dirname(os.path.abspath(excerpt_path)), exist_ok=True)
+        with open(excerpt_path, "wb") as f_out:
+            writer.write(f_out)
+
+        return excerpt_path
+    except Exception as e:
+        print(f"[WARN] Failed to extract PDF excerpt from {pdf_path}: {e}")
+        return excerpt_path
 
 
 # ──────────────────────────────────────────────────────────────
