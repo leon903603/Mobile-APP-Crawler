@@ -1,3 +1,5 @@
+version: '3.3'
+
 # Shared log-rotation policy. Without this, Docker's default json-file driver
 # grows unbounded — a crash-looping or runaway container can fill the host disk
 # (it once wrote a single 304GB log file here). Cap every service's logs.

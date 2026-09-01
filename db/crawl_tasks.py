@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from psycopg2.extras import execute_values
 
 from db.connection import get_connection
