@@ -91,16 +91,17 @@ def run_detection(apk_path: str, app_name: str | None = None) -> str | None:
                 report_data = json.load(jf)
 
         # 4. 資料清洗：使用爬蟲乾淨資料覆蓋底層反編譯亂碼 (~)^ 等)
+        clean_basename = os.path.basename(apk_path)
+        clean_name = app_name or os.path.splitext(clean_basename)[0]
+
         if report_data and isinstance(report_data, dict):
-            if "system" in report_data and isinstance(report_data["system"], dict):
-                # 修復檔案名稱
-                report_data["system"]["fileName"] = os.path.basename(apk_path)
-                
-                # 修復應用程式名稱 (顯示真實名稱如 Google Tasks)
-                if app_name:
-                    report_data["system"]["appName"] = app_name
-                elif not report_data["system"].get("appName") or report_data["system"].get("appName") in ("~)^", ""):
-                    report_data["system"]["appName"] = basename
+            for section in ("system", "result"):
+                if section in report_data and isinstance(report_data[section], dict):
+                    target_dict = report_data[section]
+                    target_dict["fileName"] = clean_basename
+                    target_dict["file_name"] = clean_basename
+                    target_dict["appName"] = clean_name
+                    target_dict["app_name"] = clean_name
 
         # 呼叫 PDF 產生器 (15148 或 172.27.0.14:8080)
         print(f"[DETECTION] 3/3 Requesting PDF generation from ({PDF_API})...")

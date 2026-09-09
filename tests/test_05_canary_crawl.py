@@ -44,8 +44,12 @@ def test_canary_crawl():
         print('       建議先執行: sudo docker compose up -d db')
         # 不中斷，繼續進行下載與檢測管線驗證
 
-    # 3. 測試真實爬取目標 (選取輕量開源或微型 APP，例如 Google Tasks 或開源計算機)
-    target_app_id = os.environ.get("TEST_APP_ID", "com.google.android.apps.tasks")
+    # 3. 測試真實爬取目標 (支援指令列指定，例如: python3 tests/test_05_canary_crawl.py org.videolan.vlc)
+    target_app_id = None
+    if len(sys.argv) > 1 and not sys.argv[1].startswith("-"):
+        target_app_id = sys.argv[1]
+    if not target_app_id:
+        target_app_id = os.environ.get("TEST_APP_ID", "org.videolan.vlc")
     print(f'[*] [3/6] 目標 Google Play APP: {target_app_id}')
 
     try:
