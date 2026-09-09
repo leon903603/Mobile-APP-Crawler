@@ -11,10 +11,22 @@ def test_pdf_generate(json_path=None):
     print('='*60)
 
     if not json_path:
-        json_path = os.path.expanduser('~/Documents/android_detection_system/Frida/test_zh.json')
+        candidates = [
+            os.environ.get('FRIDA_RESULT_JSON'),
+            os.path.expanduser('~/Documents/android_detection_system/Frida/test_zh.json'),
+            os.path.expanduser('~/Documents/android_detection_system/Frida/test.json'),
+            os.path.expanduser('~/Documents/Docker_test/androiddynamicsystem/Frida/test_zh.json'),
+            os.path.expanduser('~/Documents/Docker_test/androiddynamicsystem/Frida/test.json'),
+            '/AndroidDynamicSystem/Frida/test_zh.json',
+            '/AndroidDynamicSystem/Frida/test.json'
+        ]
+        for c in candidates:
+            if c and os.path.exists(c):
+                json_path = c
+                break
 
-    if not os.path.exists(json_path):
-        print(f'[!] 找不到測試用 JSON 報告: {json_path}')
+    if not json_path or not os.path.exists(json_path):
+        print(f'[!] 找不到測試用 JSON 報告，已搜尋候補路徑')
         return False
 
     with open(json_path, 'r', encoding='utf-8') as jf:

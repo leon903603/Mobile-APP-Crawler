@@ -11,8 +11,8 @@ def test_api_health():
     # 1. 檢測引擎 (8080)
     t0 = time.time()
     try:
-        r_det = requests.post('http://localhost:8080/analyze', timeout=5)
-        det_ok = (r_det.status_code == 400) # 400 = 服務活著且正確回報未上傳檔案
+        r_det = requests.get('http://localhost:8080/upload', timeout=5)
+        det_ok = (r_det.status_code == 200) # 200 = webapp.py 正常提供服務
         det_time = time.time() - t0
         print(f'[*] Detection API (8080)    : HTTP {r_det.status_code} | 延遲: {det_time:.3f}s | 連線正常')
     except Exception as e:

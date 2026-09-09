@@ -12,18 +12,15 @@ from db.scan_tasks import fetch_scan_task, mark_scan_done, mark_scan_failed
 import json
 import requests
 
-DETECTION_API = os.environ.get("DETECTION_API", "http://localhost:8080/analyze")
+DETECTION_API = os.environ.get("DETECTION_API", "http://localhost:8080/upload")
 PDF_API = os.environ.get("PDF_API", "http://localhost:15148/api/report")
-FRIDA_RESULT_JSON = os.environ.get(
-    "FRIDA_RESULT_JSON",
-    os.path.expanduser("~/Documents/android_detection_system/Frida/test_zh.json")
-)
+FRIDA_RESULT_JSON = os.environ.get("FRIDA_RESULT_JSON", "")
 
 def run_detection(apk_path: str) -> str | None:
     """
     呼叫地端 Detection System (base:8080) 分析 APK，並呼叫 PDF 產生器 (15148) 產出報告。
     流程：
-      1. POST http://localhost:8080/analyze 上傳 APK 執行 Androguard + MalDroid 反編譯
+      1. POST http://localhost:8080/upload 上傳 APK 執行 Androguard + MalDroid 反編譯
       2. 讀取分析結果 test_zh.json
       3. POST http://localhost:15148/api/report 將結果渲染為 PDF 報告
       4. 將 PDF 存入 REPORTS_DIR 並回傳路徑
@@ -32,7 +29,7 @@ def run_detection(apk_path: str) -> str | None:
         print(f"[WARN] APK file not found: {apk_path}")
         return None
 
-    reports_dir = os.environ.get("REPORTS_DIR", "/data/reports")
+    reports_dir = os.environ.get("REPORTS_DIR", os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "reports"))
     os.makedirs(reports_dir, exist_ok=True)
     basename = os.path.splitext(os.path.basename(apk_path))[0]
     output_pdf_path = os.path.join(reports_dir, f"{basename}_report.pdf")
@@ -40,18 +37,36 @@ def run_detection(apk_path: str) -> str | None:
     print(f"[DETECTION] 1/3 Uploading {apk_path} to Detection API ({DETECTION_API})...")
     try:
         with open(apk_path, "rb") as f:
-            files = {"file": (os.path.basename(apk_path), f, "application/vnd.android.package-archive")}
+            files = {"upload_file": (os.path.basename(apk_path), f, "application/octet-stream")}
             res = requests.post(DETECTION_API, files=files, timeout=600)
             res.raise_for_status()
-            ret_code = res.json().get("returncode", -1)
-            print(f"[DETECTION] 2/3 Analysis completed by base engine. Returncode: {ret_code}")
+            pkg_name = res.cookies.get("apk_name", "")
+            print(f"[DETECTION] 2/3 Upload accepted by base engine. Package: {pkg_name}")
 
-        # 讀取檢測產出的繁體中文資安報告資料 (test_zh.json)
-        if not os.path.exists(FRIDA_RESULT_JSON):
-            print(f"[ERROR] Expected report JSON not found at: {FRIDA_RESULT_JSON}")
+        # 讀取檢測產出的繁體中文資安報告資料 (多路徑尋找)
+        candidates = [
+            FRIDA_RESULT_JSON,
+            os.path.expanduser("~/Documents/android_detection_system/Frida/test_zh.json"),
+            os.path.expanduser("~/Documents/android_detection_system/Frida/test.json"),
+            os.path.expanduser("~/Documents/Docker_test/androiddynamicsystem/Frida/test_zh.json"),
+            os.path.expanduser("~/Documents/Docker_test/androiddynamicsystem/Frida/test.json"),
+        ]
+        if pkg_name:
+            candidates.insert(0, os.path.expanduser(f"~/Documents/android_detection_system/Frida/static_analysis_result/{pkg_name}.json"))
+            candidates.insert(1, os.path.expanduser(f"~/Documents/Docker_test/androiddynamicsystem/Frida/static_analysis_result/{pkg_name}.json"))
+
+        report_json_path = None
+        for c in candidates:
+            if c and os.path.exists(c):
+                report_json_path = c
+                break
+
+        if not report_json_path:
+            print(f"[ERROR] Expected report JSON not found in candidates: {candidates}")
             return None
 
-        with open(FRIDA_RESULT_JSON, "r", encoding="utf-8") as jf:
+        print(f"[DETECTION] Reading report JSON from {report_json_path}")
+        with open(report_json_path, "r", encoding="utf-8") as jf:
             report_data = json.load(jf)
 
         # 呼叫 PDF 產生器 (15148)
