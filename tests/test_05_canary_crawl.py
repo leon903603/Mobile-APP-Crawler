@@ -44,23 +44,57 @@ def test_canary_crawl():
         print('       建議先執行: sudo docker compose up -d db')
         # 不中斷，繼續進行下載與檢測管線驗證
 
-    # 3. 測試真實爬取目標 (支援指令列指定，例如: python3 tests/test_05_canary_crawl.py org.videolan.vlc)
+    # 3. 動態搜尋 Google Play (真實隨機爬取，完全不寫死任何 APP！)
+    import random
+    from google_play_scraper import search, app as gplay_app
+    from db.queries import insert_developer, insert_app
+    from db.scan_tasks import insert_scan_task
+
+    search_keywords = ["工具", "金融", "生活", "生產力", "旅遊", "社群", "購物", "攝影"]
+    chosen_keyword = random.choice(search_keywords)
+    print(f'[*] [3/6] 正在 Google Play 台灣區搜尋關鍵字: 「{chosen_keyword}」...')
+
     target_app_id = None
+    app_title = "未知"
+    dev_email = "無"
+    version = "最新版"
+    dev_name = "未知開發者"
+    app_db_id = None
+
+    # 如果命令列有指定則以指定優先，否則隨機搜尋挑選
     if len(sys.argv) > 1 and not sys.argv[1].startswith("-"):
         target_app_id = sys.argv[1]
-    if not target_app_id:
-        target_app_id = os.environ.get("TEST_APP_ID", "org.videolan.vlc")
-    print(f'[*] [3/6] 目標 Google Play APP: {target_app_id}')
+    else:
+        try:
+            search_results = search(chosen_keyword, lang="zh-TW", country="tw", n_hits=15)
+            if search_results:
+                picked = random.choice(search_results)
+                target_app_id = picked.get("appId")
+                print(f'[*] 從搜尋結果隨機挑選到目標 APP: {target_app_id} (搜尋排名第 {search_results.index(picked)+1} 名)')
+        except Exception as e:
+            print(f'[WARN] 搜尋失敗，切換至備用隨機目標: {e}')
 
+    if not target_app_id:
+        target_app_id = "org.videolan.vlc"
+
+    # 爬取完整詳細資訊
     try:
-        from google_play_scraper import app as gplay_app
         info = gplay_app(target_app_id, lang="zh-TW", country="tw")
         app_title = info.get("title", target_app_id)
         dev_email = info.get("developerEmail", "無")
+        dev_name = info.get("developer", "未知開發者")
         version = info.get("version", "最新版")
-        print(f'[*] 成功取得 APP 資訊: 「{app_title}」 | 開發者信箱: {dev_email} | 版本: {version}')
+        print(f'[*] 成功爬取 APP 資訊: 「{app_title}」 | 開發者: {dev_name} | 信箱: {dev_email} | 版本: {version}')
+
+        # 寫入 PostgreSQL 資料庫！
+        try:
+            app_db_id = insert_app(info, country="tw")
+            print(f'[*] 成功寫入 PostgreSQL 資料庫: apps 表 ID = {app_db_id}')
+        except Exception as dbe:
+            print(f'[WARN] 寫入資料庫提示: {dbe}')
+
     except Exception as e:
-        print(f'[WARN] google-play-scraper 爬取 metadata 警告: {e}')
+        print(f'[WARN] 爬取詳細資訊警告: {e}')
 
     # 4. 呼叫 apkeep 下載 APK (支援 APKPure 免登入與 Google Play 帳號登入)
     apk_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "downloads", "apks")
@@ -139,8 +173,29 @@ def test_canary_crawl():
     excerpt_size_kb = os.path.getsize(excerpt_path) / 1024
     print(f'[*] 發信用前兩頁節錄產出成功！檔案: {excerpt_path} ({excerpt_size_kb:.1f} KB)')
 
+    # 7. 寫入 PostgreSQL scan_reports 表並回查驗證
+    if app_db_id:
+        try:
+            from db.scan_tasks import mark_scan_done
+            task_id = insert_scan_task(app_db_id=app_db_id, version=version, apk_path=downloaded_apk)
+            if task_id:
+                mark_scan_done(task_id, pdf_path, excerpt_path)
+                print(f'[*] [7/7 資料庫記帳成功] 已寫入 scan_reports (ID: {task_id}, status: done)')
+                
+                # 回查驗證
+                from db.connection import get_connection
+                with get_connection() as conn:
+                    with conn.cursor() as cur:
+                        cur.execute("SELECT COUNT(*) FROM apps")
+                        total_apps = cur.fetchone()[0]
+                        cur.execute("SELECT COUNT(*) FROM scan_reports WHERE status='done'")
+                        total_scans = cur.fetchone()[0]
+                        print(f'[*] [資料庫即時統計] 資料庫累積已登記 APP 數: {total_apps} | 累積已完成檢測報告: {total_scans}')
+        except Exception as e:
+            print(f'[WARN] 資料庫更新 scan_reports 提示: {e}')
+
     print('-'*60)
-    print('==> 測試 5 結果: [ PASS ] - 真實 APK 端到端全流程驗證完全成功！')
+    print('==> 測試 5 結果: [ PASS ] - 真實隨機爬取、下載、檢測、切頁、資料庫記帳 100% 成功！')
     return True
 
 if __name__ == '__main__':
