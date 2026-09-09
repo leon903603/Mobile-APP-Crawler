@@ -5,3 +5,5 @@ venv/
 appcrawler.dump
 config.json
 ads/
+.env
+!.env.example
