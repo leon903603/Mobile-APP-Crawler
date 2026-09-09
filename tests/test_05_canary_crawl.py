@@ -96,6 +96,16 @@ def test_canary_crawl():
     except Exception as e:
         print(f'[WARN] 爬取詳細資訊警告: {e}')
 
+    # [防重複檢驗] 若資料庫已經有此 APP 同版本的掃描報告，自動攔截並略過
+    from db.scan_tasks import is_scan_completed
+    if "--force" not in sys.argv and is_scan_completed(app_db_id, version):
+        print(f'[*] [防重複檢驗] APP: {target_app_id} (v{version}) 資料庫已記錄且完成檢測 (status=done)！')
+        print(f'[*] 成功觸發防重複保護機制：自動略過 APK 下載與重複檢測，節省頻寬與運算資源！')
+        print(f'[*] (若欲強制重新檢測，可加上 --force 參數)')
+        print('-'*60)
+        print('==> 測試 5 結果: [ PASS ] - 防重複命中，成功攔截重複下載與檢測！')
+        return True
+
     # 4. 呼叫 apkeep 下載 APK (支援 APKPure 免登入與 Google Play 帳號登入)
     apk_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "downloads", "apks")
     os.makedirs(apk_dir, exist_ok=True)

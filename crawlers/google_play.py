@@ -12,7 +12,7 @@ from google_play_scraper import app as gplay_app, search
 
 from db.queries import insert_developer, insert_app, insert_app_version
 from db.crawl_tasks import fetch_task, mark_done, mark_failed
-from db.scan_tasks import insert_scan_task
+from db.scan_tasks import insert_scan_task, is_scan_completed
 
 from crawlers.search_terms import get_country_lang
 
@@ -201,6 +201,12 @@ def _fetch_and_process_app(app_id: str, country: str) -> None:
         return
 
     version = app_info.get("version") or "unknown"
+
+    # [Deduplication] 若資料庫已有此版本且已完成檢測，略過下載與分析
+    if is_scan_completed(app_db_id, version):
+        print(f"[GP SKIP] {app_id} (v{version}) already scanned (status=done). Skipping APK download.", flush=True)
+        return
+
     apk_path = _download_apk(app_id, version)
 
     if apk_path:

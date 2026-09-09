@@ -4,6 +4,27 @@ from db.connection import get_connection
 
 
 # ──────────────────────────────────────────────────────────────────────────────
+# CHECK IF SCAN ALREADY COMPLETED (Deduplication)
+# ──────────────────────────────────────────────────────────────────────────────
+
+def is_scan_completed(app_db_id: int, version: str) -> bool:
+    """
+    Checks if a scan report for this app and version is already completed ('done').
+    Allows crawlers to completely skip expensive APK download and analysis.
+    """
+    if not app_db_id:
+        return False
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT 1 FROM scan_reports
+                WHERE app_db_id = %s AND version = %s AND status = 'done'
+                LIMIT 1
+            """, (app_db_id, version))
+            return cur.fetchone() is not None
+
+
+# ──────────────────────────────────────────────────────────────────────────────
 # INSERT SCAN TASK
 # ──────────────────────────────────────────────────────────────────────────────
 
