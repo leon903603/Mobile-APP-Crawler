@@ -1,4 +1,4 @@
-__pycache_/
+__pycache__/
 *.pyc
 venv/
 *.png
@@ -7,3 +7,15 @@ config.json
 ads/
 .env
 !.env.example
+
+# Large binary files & generated assets (Laboratory outputs)
+downloads/
+reports/
+*.apk
+*.xapk
+*.apks
+*.pdf
+*.log
+logs/
+.system_generated/
+data/
