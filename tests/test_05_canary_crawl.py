@@ -58,7 +58,7 @@ def test_canary_crawl():
     except Exception as e:
         print(f'[WARN] google-play-scraper 爬取 metadata 警告: {e}')
 
-    # 4. 呼叫 apkeep 真實下載 APK
+    # 4. 呼叫 apkeep 下載 APK (支援 APKPure 免登入與 Google Play 帳號登入)
     apk_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "downloads", "apks")
     os.makedirs(apk_dir, exist_ok=True)
     expected_apk = os.path.join(apk_dir, f"{target_app_id}.apk")
@@ -66,18 +66,43 @@ def test_canary_crawl():
     print(f'[*] [4/6] 正在透過 apkeep 下載真實 APK 至: {apk_dir}...')
     t0 = time.time()
     try:
-        res = subprocess.run(["apkeep", "-a", target_app_id, apk_dir], capture_output=True, text=True, timeout=300)
+        cmd = ["apkeep", "-a", target_app_id]
+        
+        # 若有提供 Google Play 登入資訊則使用 google-play，否則使用免登入的 apk-pure
+        gp_email = os.environ.get("GOOGLE_PLAY_EMAIL")
+        gp_auth = os.environ.get("GOOGLE_PLAY_AUTH_TOKEN") or os.environ.get("GOOGLE_PLAY_AAS_TOKEN")
+        if gp_email and gp_auth:
+            cmd.extend(["-d", "google-play", "-e", gp_email, "--auth-token", gp_auth])
+            print(f'[*] 使用 Google Play 帳號登入下載: {gp_email}')
+        else:
+            cmd.extend(["-d", "apk-pure"])
+            print('[*] 使用 APKPure 鏡像來源下載 (無需登入 Google 帳號)')
+
+        cmd.append(apk_dir)
+        res = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
         download_time = time.time() - t0
         
-        # 尋找下載的 APK
+        # 尋找下載的 APK 或 XAPK (若是分包 xapk 自動解出主程式 .apk)
         downloaded_apk = None
         if os.path.exists(expected_apk):
             downloaded_apk = expected_apk
         else:
             for fname in os.listdir(apk_dir):
+                fpath = os.path.join(apk_dir, fname)
                 if fname.startswith(target_app_id) and fname.endswith(".apk"):
-                    downloaded_apk = os.path.join(apk_dir, fname)
+                    downloaded_apk = fpath
                     break
+                elif fname.startswith(target_app_id) and (fname.endswith(".xapk") or fname.endswith(".apks") or fname.endswith(".zip")):
+                    import zipfile
+                    with zipfile.ZipFile(fpath, "r") as zf:
+                        for member in zf.namelist():
+                            if member.endswith(".apk") and not member.startswith("config."):
+                                zf.extract(member, apk_dir)
+                                downloaded_apk = os.path.join(apk_dir, member)
+                                print(f'[*] 偵測到 XAPK 分包，成功解出核心 APK: {downloaded_apk}')
+                                break
+                    if downloaded_apk:
+                        break
 
         if not downloaded_apk or not os.path.exists(downloaded_apk):
             print(f'[!] APK 下載失敗: apkeep stderr: {res.stderr}')

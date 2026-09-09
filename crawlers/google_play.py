@@ -131,7 +131,8 @@ def _insert_app(app_info: dict, country: str) -> int | None:
 def _download_apk(app_id: str, version: str = None) -> str | None:
     """
     Downloads APK using apkeep.
-    Returns the local path to the downloaded APK file or None on failure.
+    Supports APKPure (no login) and optional Google Play credentials.
+    Automatically handles split .xapk archives by extracting the core APK.
     """
     os.makedirs(APK_DIR, exist_ok=True)
     apk_file = os.path.join(APK_DIR, f"{app_id}.apk")
@@ -139,22 +140,41 @@ def _download_apk(app_id: str, version: str = None) -> str | None:
     if os.path.exists(apk_file):
         return apk_file
 
-    cmd = ["apkeep", "-a", app_id, APK_DIR]
+    cmd = ["apkeep", "-a", app_id]
+
+    gp_email = os.environ.get("GOOGLE_PLAY_EMAIL")
+    gp_auth = os.environ.get("GOOGLE_PLAY_AUTH_TOKEN") or os.environ.get("GOOGLE_PLAY_AAS_TOKEN")
+    if gp_email and gp_auth:
+        cmd.extend(["-d", "google-play", "-e", gp_email, "--auth-token", gp_auth])
+    else:
+        cmd.extend(["-d", "apk-pure"])
+
+    cmd.append(APK_DIR)
+
     try:
         result = subprocess.run(
             cmd,
             capture_output=True,
             text=True,
-            timeout=180
+            timeout=300
         )
         if result.returncode == 0:
             if os.path.exists(apk_file):
                 return apk_file
-            # Check for downloaded files with matching prefix
+            # Check for downloaded files with matching prefix (including .xapk/.apks)
             if os.path.exists(APK_DIR):
                 for f in os.listdir(APK_DIR):
+                    fpath = os.path.join(APK_DIR, f)
                     if f.startswith(app_id) and f.endswith(".apk"):
-                        return os.path.join(APK_DIR, f)
+                        return fpath
+                    elif f.startswith(app_id) and (f.endswith(".xapk") or f.endswith(".apks") or f.endswith(".zip")):
+                        import zipfile
+                        with zipfile.ZipFile(fpath, "r") as zf:
+                            for member in zf.namelist():
+                                if member.endswith(".apk") and not member.startswith("config."):
+                                    zf.extract(member, APK_DIR)
+                                    extracted = os.path.join(APK_DIR, member)
+                                    return extracted
             return apk_file
         else:
             print(f"[WARN] apkeep failed for {app_id}: {result.stderr.strip()}")
