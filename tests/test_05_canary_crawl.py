@@ -115,10 +115,10 @@ def test_canary_crawl():
         print(f'[!] 執行 apkeep 下載失敗: {e}')
         return False
 
-    # 5. 自動送入檢測系統產出報告
-    print(f'[*] [5/6] 正在將真實 APK 送進 Detection Engine (8080) 與 PDF Generator (15148)...')
+    # 5. 自動送入檢測系統產出報告 (帶入真實 APP 名稱以清洗報告封面)
+    print(f'[*] [5/6] 正在將真實 APK 送進 Detection API 與 PDF Generator...')
     t_scan = time.time()
-    pdf_path = run_detection(downloaded_apk)
+    pdf_path = run_detection(downloaded_apk, app_name=app_title)
     if not pdf_path or not os.path.exists(pdf_path):
         print('[!] 產出 PDF 報告失敗')
         return False

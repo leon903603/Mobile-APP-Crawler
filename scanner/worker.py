@@ -20,7 +20,7 @@ DETECTION_API = os.environ.get("DETECTION_API", "http://172.27.0.19:5001/analyze
 PDF_API = os.environ.get("PDF_API", "http://172.27.0.14:8080/api/report")
 FRIDA_RESULT_JSON = os.environ.get("FRIDA_RESULT_JSON", "")
 
-def run_detection(apk_path: str) -> str | None:
+def run_detection(apk_path: str, app_name: str | None = None) -> str | None:
     """
     呼叫檢測系統分析 APK，並呼叫 PDF 產生器產出報告。
     相容支援：
@@ -90,7 +90,19 @@ def run_detection(apk_path: str) -> str | None:
             with open(report_json_path, "r", encoding="utf-8") as jf:
                 report_data = json.load(jf)
 
-        # 呼叫 PDF 產生器 (15148)
+        # 4. 資料清洗：使用爬蟲乾淨資料覆蓋底層反編譯亂碼 (~)^ 等)
+        if report_data and isinstance(report_data, dict):
+            if "system" in report_data and isinstance(report_data["system"], dict):
+                # 修復檔案名稱
+                report_data["system"]["fileName"] = os.path.basename(apk_path)
+                
+                # 修復應用程式名稱 (顯示真實名稱如 Google Tasks)
+                if app_name:
+                    report_data["system"]["appName"] = app_name
+                elif not report_data["system"].get("appName") or report_data["system"].get("appName") in ("~)^", ""):
+                    report_data["system"]["appName"] = basename
+
+        # 呼叫 PDF 產生器 (15148 或 172.27.0.14:8080)
         print(f"[DETECTION] 3/3 Requesting PDF generation from ({PDF_API})...")
         pdf_res = requests.post(PDF_API, json=report_data, timeout=60)
         pdf_res.raise_for_status()
@@ -167,8 +179,21 @@ def scan_worker(worker_id: int):
         try:
             print(f"[SCANNER-{worker_id}] Scanning app_db_id={app_db_id}, version={version}")
             
-            # 1. 檢測 APK
-            report_path = run_detection(apk_path)
+            # 查詢真實 app_name 以優化報告封面
+            app_name = None
+            try:
+                from db.connection import get_connection
+                with get_connection() as conn:
+                    with conn.cursor() as cur:
+                        cur.execute("SELECT app_name FROM apps WHERE id = %s", (app_db_id,))
+                        r = cur.fetchone()
+                        if r:
+                            app_name = r[0]
+            except Exception:
+                pass
+
+            # 1. 檢測 APK (帶入真實名稱與自動清洗)
+            report_path = run_detection(apk_path, app_name=app_name)
             if not report_path:
                 raise Exception("Detection failed: no report generated")
             
@@ -178,6 +203,15 @@ def scan_worker(worker_id: int):
             # 3. 標記完成
             mark_scan_done(task_id, report_path, excerpt_path)
             print(f"[SCANNER-{worker_id}] Done: app_db_id={app_db_id}")
+
+            # 4. 自動清理龐大的原始 APK 檔案，節省硬碟空間 (保留 PDF 完整報告與前兩頁節錄)
+            if os.environ.get("CLEANUP_APK", "true").lower() in ("true", "1", "yes"):
+                try:
+                    if apk_path and os.path.exists(apk_path):
+                        os.remove(apk_path)
+                        print(f"[SCANNER-{worker_id}] Cleaned up raw APK: {apk_path}")
+                except Exception as ex:
+                    print(f"[WARN] Failed to remove raw APK {apk_path}: {ex}")
             
         except Exception as e:
             print(f"[SCANNER-{worker_id}] Failed: {e}")
