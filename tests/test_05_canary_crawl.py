@@ -47,7 +47,7 @@ def test_canary_crawl():
     # 3. 動態搜尋 Google Play (真實隨機爬取，完全不寫死任何 APP！)
     import random
     from google_play_scraper import search, app as gplay_app
-    from db.queries import insert_developer, insert_app
+    from crawlers.google_play import _insert_app
     from db.scan_tasks import insert_scan_task
 
     search_keywords = ["工具", "金融", "生活", "生產力", "旅遊", "社群", "購物", "攝影"]
@@ -88,7 +88,7 @@ def test_canary_crawl():
 
         # 寫入 PostgreSQL 資料庫！
         try:
-            app_db_id = insert_app(info, country="tw")
+            app_db_id = _insert_app(info, country="tw")
             print(f'[*] 成功寫入 PostgreSQL 資料庫: apps 表 ID = {app_db_id}')
         except Exception as dbe:
             print(f'[WARN] 寫入資料庫提示: {dbe}')
