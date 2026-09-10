@@ -38,6 +38,35 @@
 
 ---
 
+## 🧩 核心子專案職責詳解 (CMAA-Int vs CMAA-Astatic vs CMAA-Pdf)
+
+學長將整套系統拆分成三個獨立的微服務子專案，各自的技術棧與功能如下：
+
+### 1. `CMAA-Int` (Integration / 主平台門面與商業大腦)
+- **跑在哪**：AWS EC2（Docker Compose 容器化運行）
+- **技術棧**：React (Vite + TypeScript) 前端 + Node.js (Express + TypeScript) 後端 + SQLite
+- **核心職責**：
+  - **使用者入口**：網頁操作介面，供客戶註冊、登入、購買點數、上傳 APK/IPA。
+  - **帳務與點數中心**：串接 **Firebase Auth** (登入驗證) 與 **Firestore** (扣款點數 `users/{uid}/credits`)，並支援藍新金流 (NewebPay)。
+  - **檔案中繼調度**：處理 AWS S3 上傳簽章 (Presigned URL)，並在收到 APK 後，透過 HTTP 轉發給 `CMAA-Astatic` 進行檢測。
+
+### 2. `CMAA-Astatic` (Android Static Analysis / 靜態分析與弱點引擎)
+- **跑在哪**：實驗室舊主機 `192.168.50.53`（原規劃為 AWS Lambda，因 10GB 記憶體被拒，改由舊主機跑 Docker）
+- **技術棧**：Python 3 + Androguard + MalDroid + Celery/Redis + Flask
+- **核心職責**：
+  - **逆向工程核心 (`androguard_server.py`)**：靜態解構 APK 的 `AndroidManifest.xml`、DEX 位元組碼、權限與簽章資訊。
+  - **弱點特徵匹配 (`maldroid_main.py`)**：掃描 Android 常見的 **79 項資安弱點與惡意特徵**（如明文 HTTP 傳輸、過度危險權限、憑證弱點等）。
+  - **RESTful API 隊列 (`queue_wrapper/wrapper.py`)**：提供標準端點 `POST /analyze_apk`，接收二進位 APK，排隊分析完成後**同步回傳完整的 JSON 檢測報告**。
+
+### 3. `CMAA-Pdf` (PDF Report Generator / 專業資安報告渲染器)
+- **跑在哪**：AWS Lambda (`cmaa-pdf-report`) 或實驗室 Docker 容器 (Port `8080` / `15148`)
+- **技術棧**：Python + ReportLab / 樣板引擎
+- **核心職責**：
+  - 將靜態分析產出的 JSON 數據，渲染排版成 **長達 36 頁的完整繁體中文/英文商業資安檢測 PDF 報告**（包含風險評分等級、漏洞分析與修復建議）。
+  - 自動擷取前 2 頁精華摘錄（供 EDM 冷郵件行銷獲客使用）。
+
+---
+
 ## ☁️ 主機一：AWS 雲端環境 (SaaS 門面大腦)
 
 - **執行個體**：`i-03d897a7c64334194` (`t3.small`)，地區：亞太雪梨 `ap-southeast-2`
