@@ -98,10 +98,11 @@ def run_detection(apk_path: str, app_name: str | None = None) -> str | None:
             for section in ("system", "result"):
                 if section in report_data and isinstance(report_data[section], dict):
                     target_dict = report_data[section]
-                    target_dict["fileName"] = clean_basename
                     target_dict["file_name"] = clean_basename
-                    target_dict["appName"] = clean_name
                     target_dict["app_name"] = clean_name
+                    # 移除多餘的駝峰命名鍵，避免在 PDF 上印出未翻譯的 label.filename 和 label.appname
+                    target_dict.pop("fileName", None)
+                    target_dict.pop("appName", None)
 
         # 呼叫 PDF 產生器 (15148 或 172.27.0.14:8080)
         print(f"[DETECTION] 3/3 Requesting PDF generation from ({PDF_API})...")

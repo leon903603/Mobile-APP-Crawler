@@ -19,7 +19,7 @@ def test_canary_crawl():
       3. 從 Google Play 真實抓取 1 款輕量 APP
       4. 呼叫 apkeep 真實下載 APK
       5. 自動送交 Detection Engine (8080) 反編譯檢測
-      6. PDF 產生器 (15148) 產出完整繁中資安報告
+      6. PDF 產生器 (8080) 產出完整繁中資安報告
       7. 自動切出前 2 頁行銷精華 PDF 節錄
     """
     print('\n' + '='*60)
