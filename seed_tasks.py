@@ -32,8 +32,10 @@ with open("listings/google-play-apps-categories.json") as f:
 # BUILD AND INSERT TASKS PER REGION
 # ──────────────────────────────────────────────────────────────────────────────
 
-total_as = 0
-total_gp = 0
+total_as_inserted = 0
+total_as_skipped = 0
+total_gp_inserted = 0
+total_gp_skipped = 0
 
 for region, filepath in REGION_FILES.items():
     with open(filepath) as f:
@@ -55,9 +57,10 @@ for region, filepath in REGION_FILES.items():
                 "app_store", country, "keyword", term, region,
             ))
 
-    inserted = add_tasks_bulk(app_tasks)
-    total_as += inserted
-    print(f"[SEED] app_store  region={region}  queued={len(app_tasks)}  inserted={inserted}", flush=True)
+    inserted, skipped = add_tasks_bulk(app_tasks)
+    total_as_inserted += inserted
+    total_as_skipped += skipped
+    print(f"[SEED] app_store  region={region}  queued={len(app_tasks)}  inserted={inserted}  skipped_existing={skipped}", flush=True)
 
     # ── Google Play tasks ─────────────────────────────────────────────────────
     gp_tasks: list[tuple] = []
@@ -79,9 +82,14 @@ for region, filepath in REGION_FILES.items():
                     "google_play", country, "language", f"{lang}::{term}", region,
                 ))
 
-    inserted = add_tasks_bulk(gp_tasks)
-    total_gp += inserted
-    print(f"[SEED] google_play  region={region}  queued={len(gp_tasks)}  inserted={inserted}", flush=True)
+    inserted, skipped = add_tasks_bulk(gp_tasks)
+    total_gp_inserted += inserted
+    total_gp_skipped += skipped
+    print(f"[SEED] google_play  region={region}  queued={len(gp_tasks)}  inserted={inserted}  skipped_existing={skipped}", flush=True)
 
 
-print(f"[SEED] done  total_app_store={total_as}  total_google_play={total_gp}", flush=True)
+print(
+    f"[SEED] done  App Store: (inserted={total_as_inserted}, skipped_existing={total_as_skipped})  "
+    f"Google Play: (inserted={total_gp_inserted}, skipped_existing={total_gp_skipped})",
+    flush=True
+)

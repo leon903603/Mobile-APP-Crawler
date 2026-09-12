@@ -24,13 +24,13 @@ def add_task(source: str, country: str, task_type: str, payload: str, region: st
 # BULK INSERT  (used by seed_tasks.py)
 # ──────────────────────────────────────────────────────────────────────────────
 
-def add_tasks_bulk(tasks: list[tuple]) -> int:
+def add_tasks_bulk(tasks: list[tuple]) -> tuple[int, int]:
     """
     tasks = [(source, country, task_type, payload, region), ...]
-    Returns the number of rows passed in (duplicates are silently skipped).
+    Returns (actual_inserted, already_existed_skipped).
     """
     if not tasks:
-        return 0
+        return 0, 0
 
     with get_connection() as conn:
         with conn.cursor() as cur:
@@ -40,8 +40,10 @@ def add_tasks_bulk(tasks: list[tuple]) -> int:
                 ON CONFLICT DO NOTHING
             """, tasks)
             conn.commit()
+            actual_inserted = cur.rowcount if cur.rowcount >= 0 else 0
+            skipped = len(tasks) - actual_inserted
 
-    return len(tasks)
+    return actual_inserted, skipped
 
 
 # ──────────────────────────────────────────────────────────────────────────────
