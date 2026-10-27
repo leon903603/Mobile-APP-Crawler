@@ -1,3 +1,4 @@
+SYSTEM_MEMO.md
 __pycache__/
 *.pyc
 venv/
@@ -7,6 +8,7 @@ config.json
 ads/
 .env
 !.env.example
+
 
 # Large binary files & generated assets (Laboratory outputs)
 downloads/
