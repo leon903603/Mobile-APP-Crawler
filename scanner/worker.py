@@ -20,6 +20,29 @@ DETECTION_API = os.environ.get("DETECTION_API", "http://172.27.0.19:5001/analyze
 PDF_API = os.environ.get("PDF_API", "http://172.27.0.14:8080/api/report")
 FRIDA_RESULT_JSON = os.environ.get("FRIDA_RESULT_JSON", "")
 
+_EN_RULES_CACHE = None
+
+def _load_english_rules() -> dict:
+    """載入官方英文版資安基準規則字典，覆蓋中文規則標題與敘述"""
+    global _EN_RULES_CACHE
+    if _EN_RULES_CACHE is not None:
+        return _EN_RULES_CACHE
+
+    candidates = [
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "android_static_en.json"),
+        "/home/islab/CMAA-Astatic-Production/android_static_en.json",
+    ]
+    for path in candidates:
+        if os.path.exists(path):
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    _EN_RULES_CACHE = json.load(f)
+                    print(f"[SCANNER] Loaded {len(_EN_RULES_CACHE)} English security rules from {path}")
+                    return _EN_RULES_CACHE
+            except Exception as e:
+                print(f"[WARN] Failed to load English rules from {path}: {e}")
+    return {}
+
 def run_detection(apk_path: str, app_name: str | None = None) -> str | None:
     """
     呼叫檢測系統分析 APK，並呼叫 PDF 產生器產出報告。
@@ -90,11 +113,27 @@ def run_detection(apk_path: str, app_name: str | None = None) -> str | None:
             with open(report_json_path, "r", encoding="utf-8") as jf:
                 report_data = json.load(jf)
 
-        # 4. 資料清洗：使用爬蟲乾淨資料覆蓋底層反編譯亂碼 (~)^ 等)
+        # 4. 資料清洗與英文國際化：
+        #    a. 使用爬蟲乾淨資料覆蓋底層反編譯亂碼 (~)^ 等)
+        #    b. 強制設定 lang = 'en'，注入英文規則標題與敘述，確保產出全英文 PDF 報告
         clean_basename = os.path.basename(apk_path)
         clean_name = app_name or os.path.splitext(clean_basename)[0]
 
         if report_data and isinstance(report_data, dict):
+            # 強制指定英文語系，不生成中文報告
+            report_data["lang"] = "en"
+
+            # 注入官方英文規則字典
+            en_rules = _load_english_rules()
+            if en_rules:
+                current_rules = report_data.get("rule", {})
+                for r_key, r_val in en_rules.items():
+                    if r_key in current_rules:
+                        current_rules[r_key].update(r_val)
+                    else:
+                        current_rules[r_key] = r_val
+                report_data["rule"] = current_rules
+
             for section in ("system", "result"):
                 if section in report_data and isinstance(report_data[section], dict):
                     target_dict = report_data[section]
@@ -164,14 +203,19 @@ def extract_first_pages(pdf_path: str, n: int = 2) -> str | None:
 # ──────────────────────────────────────────────────────────────
 # 單個 Scanner Worker
 # ──────────────────────────────────────────────────────────────
-def scan_worker(worker_id: int):
-    """單個檢測執行緒"""
-    print(f"[SCANNER-{worker_id}] started")
+def scan_worker(worker_id: int, batch_limit: int = 0):
+    """單個檢測執行緒，支援批次上限與結束"""
+    print(f"[SCANNER-{worker_id}] started (batch_limit={batch_limit})")
+    scan_once = os.environ.get("SCAN_ONCE", "false").lower() in ("true", "1", "yes")
+    processed_count = 0
     
     while True:
         task = fetch_scan_task()
         
         if not task:
+            if scan_once or batch_limit > 0:
+                print(f"[SCANNER-{worker_id}] No pending scan tasks found. Exiting.")
+                return
             time.sleep(1)
             continue
         
@@ -206,7 +250,8 @@ def scan_worker(worker_id: int):
             
             # 3. 標記完成
             mark_scan_done(task_id, report_path, excerpt_path)
-            print(f"[SCANNER-{worker_id}] Done: app_db_id={app_db_id}")
+            processed_count += 1
+            print(f"[SCANNER-{worker_id}] Done: app_db_id={app_db_id} ({processed_count}/{batch_limit if batch_limit else '∞'})")
 
             # 4. 自動清理龐大的原始 APK 檔案，節省硬碟空間 (保留 PDF 完整報告與前兩頁節錄)
             if os.environ.get("CLEANUP_APK", "true").lower() in ("true", "1", "yes"):
@@ -216,6 +261,14 @@ def scan_worker(worker_id: int):
                         print(f"[SCANNER-{worker_id}] Cleaned up raw APK: {apk_path}")
                 except Exception as ex:
                     print(f"[WARN] Failed to remove raw APK {apk_path}: {ex}")
+
+            if scan_once:
+                print(f"[SCANNER-{worker_id}] Single task completed. Exiting (SCAN_ONCE=true).")
+                return
+
+            if batch_limit > 0 and processed_count >= batch_limit:
+                print(f"[SCANNER-{worker_id}] Reached batch limit ({batch_limit}). Exiting.")
+                return
             
         except Exception as e:
             print(f"[SCANNER-{worker_id}] Failed: {e}")
@@ -223,16 +276,19 @@ def scan_worker(worker_id: int):
 
 
 # ──────────────────────────────────────────────────────────────
-# 啟動多個 Worker
+# 啟動 Worker
 # ──────────────────────────────────────────────────────────────
-def worker():
+def worker(batch_limit: int = 0):
     """啟動 Scanner 服務"""
-    worker_count = int(os.environ.get("SCAN_WORKERS", 2))
+    scan_once = os.environ.get("SCAN_ONCE", "false").lower() in ("true", "1", "yes")
+    if scan_once:
+        batch_limit = 1
+    worker_count = 1 if (scan_once or batch_limit > 0) else int(os.environ.get("SCAN_WORKERS", 2))
     
-    print(f"[SCANNER] Starting {worker_count} workers")
+    print(f"[SCANNER] Starting {worker_count} workers (SCAN_ONCE={scan_once}, batch_limit={batch_limit})")
     
     threads = [
-        threading.Thread(target=scan_worker, args=(i,), daemon=True)
+        threading.Thread(target=scan_worker, args=(i, batch_limit), daemon=False)
         for i in range(worker_count)
     ]
     
@@ -241,3 +297,16 @@ def worker():
     
     for t in threads:
         t.join()
+
+
+if __name__ == "__main__":
+    import argparse
+    parser = argparse.ArgumentParser(description="Scanner Worker for APK Static Analysis & English PDF Reports")
+    parser.add_argument("--once", action="store_true", help="Scan only one task and exit")
+    parser.add_argument("--batch", type=int, default=int(os.environ.get("SCAN_BATCH", 0)), help="Scan up to N tasks and exit cleanly")
+    args = parser.parse_args()
+
+    if args.once:
+        os.environ["SCAN_ONCE"] = "true"
+
+    worker(batch_limit=args.batch)

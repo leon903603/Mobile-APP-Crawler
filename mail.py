@@ -215,8 +215,8 @@ def main():
     parser.add_argument(
         "--limit",
         type=int,
-        default=4,
-        help="Target number of successful emails to dispatch in this batch (default: 4)"
+        default=1,
+        help="Target number of successful emails to dispatch in this batch (default: 1, ideal for dispersed cron)"
     )
     parser.add_argument(
         "--daily-quota",

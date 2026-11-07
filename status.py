@@ -71,9 +71,12 @@ def print_dashboard():
             email_row = cur.fetchone()
             sent_today, sent_week, sent_total, failed_total, dry_run_total = email_row
 
+    week_pct = f"{(sent_week / 20.0) * 100:.0f}%"
+    day_pct = f"{(sent_today / 4.0) * 100:.0f}%"
+
     # Render Dashboard
     print("\n" + "╔" + "═" * 60 + "╗")
-    print(f"║ {'CMAA Pipeline Real-Time Dashboard':^58} ║")
+    print(f"║ {'CMAA Outreach SOP Automated Pipeline Dashboard':^58} ║")
     print(f"║ {datetime.now().strftime('%Y-%m-%d %H:%M:%S'):^58} ║")
     print("╠" + "═" * 60 + "╣")
     print(f"║ 📱 APP Inventory                                           ║")
@@ -83,8 +86,8 @@ def print_dashboard():
     print(f"║   • Developers Recorded       : {total_devs:>12,}               ║")
     print(f"║   • Mailable Developers (Email): {mailable_devs:>12,}               ║")
     print("╠" + "═" * 60 + "╣")
-    print(f"║ 🛡️ Security Scan Queue (scan_reports)                       ║")
-    print(f"║   • Completed ('done')        : {scan_stats.get('done', 0):>12,}               ║")
+    print(f"║ 🛡️ Security Scan Queue (English PDF Reports)                ║")
+    print(f"║   • Completed & Ready ('done'): {scan_stats.get('done', 0):>12,}               ║")
     print(f"║   • In-Progress ('running')   : {scan_stats.get('running', 0):>12,}               ║")
     print(f"║   • Pending Queue             : {scan_stats.get('pending', 0):>12,}               ║")
     print(f"║     - High Priority (>=80)    : {high_p:>12,}               ║")
@@ -92,9 +95,9 @@ def print_dashboard():
     print(f"║     - Low Priority (<50)      : {low_p:>12,}               ║")
     print(f"║   • Failed / Dead             : {scan_stats.get('dead', 0):>12,}               ║")
     print("╠" + "═" * 60 + "╣")
-    print(f"║ ✉️ Outreach Email Outreach (Resend)                        ║")
-    print(f"║   • Sent Today (Quota: 4)     : {sent_today:>12,}               ║")
-    print(f"║   • Sent This Week (Quota: 20): {sent_week:>12,}               ║")
+    print(f"║ ✉️ Outreach Progress (Weekly Goal: 20 Emails)               ║")
+    print(f"║   • Sent This Week            : {sent_week:>6} / 20 ({week_pct:>4})       ║")
+    print(f"║   • Sent Today                : {sent_today:>6} /  4 ({day_pct:>4})       ║")
     print(f"║   • Sent All-Time             : {sent_total:>12,}               ║")
     print(f"║   • Failed Dispatches         : {failed_total:>12,}               ║")
     print(f"║   • Dry-Run Simulations       : {dry_run_total:>12,}               ║")
