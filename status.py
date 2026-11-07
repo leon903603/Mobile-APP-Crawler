@@ -52,11 +52,17 @@ def print_dashboard():
             p_row = cur.fetchone()
             high_p, med_p, low_p = p_row[0], p_row[1], p_row[2]
 
-            # 4. Email Log
+            # 4. Email Log (Calendar Week & Asia/Taipei Timezone Aligned)
             cur.execute("""
                 SELECT
-                    COUNT(*) FILTER (WHERE sent_at::date = CURRENT_DATE AND status = 'sent') AS sent_today,
-                    COUNT(*) FILTER (WHERE sent_at > NOW() - INTERVAL '7 days' AND status = 'sent') AS sent_week,
+                    COUNT(*) FILTER (
+                        WHERE status = 'sent'
+                          AND (sent_at AT TIME ZONE 'Asia/Taipei')::date = (NOW() AT TIME ZONE 'Asia/Taipei')::date
+                    ) AS sent_today,
+                    COUNT(*) FILTER (
+                        WHERE status = 'sent'
+                          AND date_trunc('week', sent_at AT TIME ZONE 'Asia/Taipei') = date_trunc('week', NOW() AT TIME ZONE 'Asia/Taipei')
+                    ) AS sent_week,
                     COUNT(*) FILTER (WHERE status = 'sent') AS sent_total,
                     COUNT(*) FILTER (WHERE status = 'failed') AS failed_total,
                     COUNT(*) FILTER (WHERE status = 'dry_run') AS dry_run_total
@@ -87,8 +93,8 @@ def print_dashboard():
     print(f"║   • Failed / Dead             : {scan_stats.get('dead', 0):>12,}               ║")
     print("╠" + "═" * 60 + "╣")
     print(f"║ ✉️ Outreach Email Outreach (Resend)                        ║")
-    print(f"║   • Sent Today (Quota: 5)     : {sent_today:>12,}               ║")
-    print(f"║   • Sent This Week (Quota: 25): {sent_week:>12,}               ║")
+    print(f"║   • Sent Today (Quota: 4)     : {sent_today:>12,}               ║")
+    print(f"║   • Sent This Week (Quota: 20): {sent_week:>12,}               ║")
     print(f"║   • Sent All-Time             : {sent_total:>12,}               ║")
     print(f"║   • Failed Dispatches         : {failed_total:>12,}               ║")
     print(f"║   • Dry-Run Simulations       : {dry_run_total:>12,}               ║")

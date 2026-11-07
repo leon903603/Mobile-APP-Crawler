@@ -1,4 +1,5 @@
 import pytest
+import os
 from datetime import datetime, time
 from email_pipeline.guard import can_dispatch_email, get_random_throttle_delay
 from email_pipeline.payload import (
@@ -8,24 +9,41 @@ from email_pipeline.payload import (
     OPT_OUT_STATEMENT,
 )
 from email_pipeline.sender import dispatch_outreach_email
+from scanner.worker import extract_first_pages
+from backfill_scan_tasks import fetch_candidate_apps
 
 
 def test_can_dispatch_email_allowed_during_working_hours_under_quota():
     # 2026-10-07 is Wednesday (weekday 2)
     test_time = datetime(2026, 10, 7, 10, 30, 0)
-    allowed, reason = can_dispatch_email(now=test_time, daily_sent_count=3, quota_limit=20)
+    allowed, reason = can_dispatch_email(now=test_time, daily_sent_count=1)
     assert allowed is True
     assert reason == ""
 
 
+def test_can_dispatch_email_default_daily_and_weekly_quotas():
+    # Wednesday 14:00
+    test_time = datetime(2026, 10, 7, 14, 0, 0)
+
+    # Hits default daily quota of 4
+    allowed_d, reason_d = can_dispatch_email(now=test_time, daily_sent_count=4)
+    assert allowed_d is False
+    assert "daily quota" in reason_d.lower()
+
+    # Hits default weekly quota of 20
+    allowed_w, reason_w = can_dispatch_email(now=test_time, daily_sent_count=1, weekly_sent_count=20)
+    assert allowed_w is False
+    assert "weekly quota" in reason_w.lower()
+
+
 def test_can_dispatch_email_blocked_outside_working_hours():
     early_time = datetime(2026, 10, 7, 8, 45, 0)
-    allowed, reason = can_dispatch_email(now=early_time, daily_sent_count=0, quota_limit=20)
+    allowed, reason = can_dispatch_email(now=early_time, daily_sent_count=0)
     assert allowed is False
     assert "working hours" in reason.lower()
 
     late_time = datetime(2026, 10, 7, 18, 15, 0)
-    allowed, reason = can_dispatch_email(now=late_time, daily_sent_count=0, quota_limit=20)
+    allowed, reason = can_dispatch_email(now=late_time, daily_sent_count=0)
     assert allowed is False
     assert "working hours" in reason.lower()
 
@@ -33,7 +51,7 @@ def test_can_dispatch_email_blocked_outside_working_hours():
 def test_can_dispatch_email_blocked_on_weekends():
     # 2026-10-10 is Saturday (weekday 5)
     saturday_noon = datetime(2026, 10, 10, 12, 0, 0)
-    allowed, reason = can_dispatch_email(now=saturday_noon, daily_sent_count=0, quota_limit=20)
+    allowed, reason = can_dispatch_email(now=saturday_noon, daily_sent_count=0)
     assert allowed is False
     assert "weekend" in reason.lower()
 
@@ -48,20 +66,6 @@ def test_can_dispatch_email_bypass_hours_flag():
     allowed, reason = can_dispatch_email(now=sunday_midnight, daily_sent_count=0, bypass_hours=True)
     assert allowed is True
     assert reason == ""
-
-
-def test_can_dispatch_email_blocked_when_daily_quota_reached():
-    test_time = datetime(2026, 10, 7, 14, 0, 0)
-    allowed, reason = can_dispatch_email(now=test_time, daily_sent_count=20, quota_limit=20)
-    assert allowed is False
-    assert "daily quota" in reason.lower()
-
-
-def test_can_dispatch_email_blocked_when_weekly_quota_reached():
-    test_time = datetime(2026, 10, 7, 14, 0, 0)
-    allowed, reason = can_dispatch_email(now=test_time, daily_sent_count=2, weekly_sent_count=25, quota_limit=5, weekly_quota_limit=25)
-    assert allowed is False
-    assert "weekly quota" in reason.lower()
 
 
 def test_get_random_throttle_delay_within_range():
@@ -117,6 +121,24 @@ def test_build_outreach_email_supports_attachments():
     assert "attachments" in payload
     assert len(payload["attachments"]) == 1
     assert payload["attachments"][0]["filename"] == "report.pdf"
+
+
+def test_extract_first_pages_returns_none_on_missing_file():
+    # Defense check: Never return fake non-existent paths on missing files
+    result = extract_first_pages("/non/existent/path/report.pdf")
+    assert result is None
+
+
+def test_backfill_candidate_query_executes_cleanly():
+    # Test DB query logic executes without syntax errors
+    candidates = fetch_candidate_apps(limit=3)
+    assert isinstance(candidates, list)
+    for c in candidates:
+        app_db_id, app_id, app_name, country, dev_name, dev_email, installs = c
+        assert app_db_id > 0
+        assert app_id != ""
+        assert dev_email is not None
+        assert "@" in dev_email
 
 
 def test_dispatch_outreach_email_dry_run_mode_does_not_call_network():

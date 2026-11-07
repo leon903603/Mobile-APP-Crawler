@@ -124,13 +124,13 @@ def run_detection(apk_path: str, app_name: str | None = None) -> str | None:
 # ──────────────────────────────────────────────────────────────
 # 擷取 PDF 前兩頁
 # ──────────────────────────────────────────────────────────────
-def extract_first_pages(pdf_path: str, n: int = 2) -> str:
-    """擷取 PDF 前 n 頁"""
-    excerpt_path = pdf_path.replace(".pdf", "_excerpt.pdf") if pdf_path.endswith(".pdf") else f"{pdf_path}_excerpt.pdf"
+def extract_first_pages(pdf_path: str, n: int = 2) -> str | None:
+    """擷取 PDF 前 n 頁，失敗時回傳 None"""
+    if not pdf_path or not os.path.exists(pdf_path):
+        print(f"[WARN] Cannot extract excerpt, source PDF does not exist: {pdf_path}")
+        return None
 
-    if not os.path.exists(pdf_path):
-        # Stub or test mode when actual report file is not yet generated
-        return excerpt_path
+    excerpt_path = pdf_path.replace(".pdf", "_excerpt.pdf") if pdf_path.endswith(".pdf") else f"{pdf_path}_excerpt.pdf"
 
     try:
         try:
@@ -155,10 +155,10 @@ def extract_first_pages(pdf_path: str, n: int = 2) -> str:
         with open(excerpt_path, "wb") as f_out:
             writer.write(f_out)
 
-        return excerpt_path
+        return excerpt_path if os.path.exists(excerpt_path) else None
     except Exception as e:
         print(f"[WARN] Failed to extract PDF excerpt from {pdf_path}: {e}")
-        return excerpt_path
+        return None
 
 
 # ──────────────────────────────────────────────────────────────
@@ -196,11 +196,13 @@ def scan_worker(worker_id: int):
 
             # 1. 檢測 APK (帶入真實名稱與自動清洗)
             report_path = run_detection(apk_path, app_name=app_name)
-            if not report_path:
-                raise Exception("Detection failed: no report generated")
+            if not report_path or not os.path.exists(report_path):
+                raise Exception("Detection failed: no valid report PDF generated")
             
             # 2. 擷取前兩頁
             excerpt_path = extract_first_pages(report_path)
+            if not excerpt_path or not os.path.exists(excerpt_path):
+                raise Exception("Excerpt extraction failed: no excerpt PDF generated")
             
             # 3. 標記完成
             mark_scan_done(task_id, report_path, excerpt_path)
