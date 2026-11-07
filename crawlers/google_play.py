@@ -113,6 +113,9 @@ def _insert_app(app_info: dict, country: str) -> int | None:
             app_name=app_info.get("title"),
             category=app_info.get("genre") or "Unknown",
             country=country,
+            min_installs=app_info.get("minInstalls") or 0,
+            score=app_info.get("score"),
+            ratings_count=app_info.get("ratings") or 0,
         )
         if version := app_info.get("version"):
             insert_app_version(app_db_id, version)

@@ -28,25 +28,26 @@ def is_scan_completed(app_db_id: int, version: str) -> bool:
 # INSERT SCAN TASK
 # ──────────────────────────────────────────────────────────────────────────────
 
-def insert_scan_task(app_db_id: int, version: str, apk_path: str) -> int | None:
+def insert_scan_task(app_db_id: int, version: str, apk_path: str, priority: int = 0) -> int | None:
     """
-    Inserts a new scan task for an app version.
+    Inserts a new scan task for an app version with priority weighting.
     Returns the task id, or existing id if duplicate.
     """
     with get_connection() as conn:
         with conn.cursor() as cur:
             cur.execute("""
-                INSERT INTO scan_reports (app_db_id, version, apk_path, status)
-                VALUES (%s, %s, %s, 'pending')
+                INSERT INTO scan_reports (app_db_id, version, apk_path, status, priority)
+                VALUES (%s, %s, %s, 'pending', %s)
                 ON CONFLICT (app_db_id, version) DO UPDATE SET
-                    apk_path = EXCLUDED.apk_path,
-                    status   = CASE
+                    apk_path   = EXCLUDED.apk_path,
+                    priority   = GREATEST(EXCLUDED.priority, scan_reports.priority),
+                    status     = CASE
                         WHEN scan_reports.status = 'dead' THEN 'pending'
                         ELSE scan_reports.status
                     END,
                     updated_at = NOW()
                 RETURNING id
-            """, (app_db_id, version, apk_path))
+            """, (app_db_id, version, apk_path, priority))
             row = cur.fetchone()
             conn.commit()
             return row[0] if row else None
@@ -58,7 +59,7 @@ def insert_scan_task(app_db_id: int, version: str, apk_path: str) -> int | None:
 
 def fetch_scan_task() -> tuple | None:
     """
-    Atomically claims one pending scan task.
+    Atomically claims one pending scan task ordered by priority DESC, id ASC.
     Uses UPDATE … WHERE id = (SELECT … FOR UPDATE SKIP LOCKED) so multiple
     threads / containers never claim the same row.
     Returns (id, app_db_id, version, apk_path) or None.
@@ -76,7 +77,7 @@ def fetch_scan_task() -> tuple | None:
                         SELECT id
                         FROM   scan_reports
                         WHERE  status = 'pending'
-                        ORDER  BY id
+                        ORDER  BY priority DESC, id ASC
                         FOR UPDATE SKIP LOCKED
                         LIMIT  1
                     )
@@ -95,10 +96,7 @@ def fetch_scan_task() -> tuple | None:
 # MARK SCAN DONE
 # ──────────────────────────────────────────────────────────────────────────────
 
-def mark_scan_done(task_id: int, report_path: str, excerpt_path: str):
-    """
-    Marks the scan task as 'done' and saves the report and excerpt file paths.
-    """
+def mark_scan_done(task_id: int, report_path: str, excerpt_path: str = None):
     with get_connection() as conn:
         with conn.cursor() as cur:
             cur.execute("""
@@ -113,14 +111,10 @@ def mark_scan_done(task_id: int, report_path: str, excerpt_path: str):
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# MARK SCAN FAILED (auto-retry up to 3 attempts, then 'dead')
+# MARK SCAN FAILED
 # ──────────────────────────────────────────────────────────────────────────────
 
 def mark_scan_failed(task_id: int, error: str = None):
-    """
-    Increments retries. If retries < 3 the task goes back to 'pending'
-    so another worker can retry it. After 3 failures it becomes 'dead'.
-    """
     with get_connection() as conn:
         with conn.cursor() as cur:
             cur.execute("""
@@ -135,14 +129,10 @@ def mark_scan_failed(task_id: int, error: str = None):
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# RESET STUCK SCAN TASKS (run periodically / at container startup)
+# RESET STUCK SCAN TASKS
 # ──────────────────────────────────────────────────────────────────────────────
 
-def reset_stuck_scan_tasks(timeout_minutes: int = 30):
-    """
-    Scan tasks that have been 'running' longer than timeout_minutes are assumed
-    to belong to a dead worker and are reset to 'pending'.
-    """
+def reset_stuck_scan_tasks(timeout_minutes: int = 60):
     with get_connection() as conn:
         with conn.cursor() as cur:
             cur.execute("""
