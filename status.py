@@ -65,11 +65,12 @@ def print_dashboard():
                     ) AS sent_week,
                     COUNT(*) FILTER (WHERE status = 'sent') AS sent_total,
                     COUNT(*) FILTER (WHERE status = 'failed') AS failed_total,
-                    COUNT(*) FILTER (WHERE status = 'dry_run') AS dry_run_total
+                    COUNT(*) FILTER (WHERE status = 'dry_run') AS dry_run_total,
+                    COUNT(*) FILTER (WHERE status = 'test') AS test_total
                 FROM email_log;
             """)
             email_row = cur.fetchone()
-            sent_today, sent_week, sent_total, failed_total, dry_run_total = email_row
+            sent_today, sent_week, sent_total, failed_total, dry_run_total, test_total = email_row
 
     week_pct = f"{(sent_week / 20.0) * 100:.0f}%"
     day_pct = f"{(sent_today / 4.0) * 100:.0f}%"
@@ -96,11 +97,12 @@ def print_dashboard():
     print(f"║   • Failed / Dead             : {scan_stats.get('dead', 0):>12,}               ║")
     print("╠" + "═" * 60 + "╣")
     print(f"║ ✉️ Outreach Progress (Weekly Goal: 20 Emails)               ║")
-    print(f"║   • Sent This Week            : {sent_week:>6} / 20 ({week_pct:>4})       ║")
-    print(f"║   • Sent Today                : {sent_today:>6} /  4 ({day_pct:>4})       ║")
-    print(f"║   • Sent All-Time             : {sent_total:>12,}               ║")
-    print(f"║   • Failed Dispatches         : {failed_total:>12,}               ║")
+    print(f"║   • Sent This Week (Official) : {sent_week:>6} / 20 ({week_pct:>4})       ║")
+    print(f"║   • Sent Today (Official)     : {sent_today:>6} /  4 ({day_pct:>4})       ║")
+    print(f"║   • Sent All-Time (Official)  : {sent_total:>12,}               ║")
+    print(f"║   • Live Test Invocations     : {test_total:>12,}               ║")
     print(f"║   • Dry-Run Simulations       : {dry_run_total:>12,}               ║")
+    print(f"║   • Failed Dispatches         : {failed_total:>12,}               ║")
     print("╚" + "═" * 60 + "╝\n")
 
 
