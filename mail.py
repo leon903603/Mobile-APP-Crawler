@@ -254,6 +254,15 @@ def main():
     )
     args = parser.parse_args()
 
+    # Safety Kill-Switch: Protect developers during testing phase
+    outreach_enabled = os.environ.get("OUTREACH_ENABLED", "false").lower() in ("true", "1", "yes")
+    if not args.dry_run and not outreach_enabled and not args.test_email:
+        print("[SAFETY LOCK] OUTREACH_ENABLED is 'false' (testing mode active).")
+        print("              Real emails to third-party developers are blocked.")
+        print("              Automatically falling back to --dry-run mode for safety.")
+        print("              (To test receiving a real email, use: --test-email your_email@example.com)")
+        args.dry_run = True
+
     api_key = os.environ.get("RESEND_API_KEY")
     if not args.dry_run and not api_key:
         print("[!] Error: RESEND_API_KEY environment variable is required for live dispatch.")

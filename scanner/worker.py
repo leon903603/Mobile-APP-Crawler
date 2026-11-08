@@ -1,8 +1,15 @@
 from __future__ import annotations
 
 import os
+import sys
 import time
 import threading
+
+# 確保專案根目錄在 sys.path 中
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _ROOT not in sys.path:
+    sys.path.insert(0, _ROOT)
+
 from db.scan_tasks import fetch_scan_task, mark_scan_done, mark_scan_failed
 
 
