@@ -340,6 +340,17 @@ def main():
             print(f"\n[SKIP-FILE-MISSING] Excerpt PDF file not found at '{abs_path}' for App: {app_name}. Skipping.")
             continue
 
+        # English Language Guard: strictly prevent sending legacy Chinese PDF reports
+        try:
+            from PyPDF2 import PdfReader
+            _reader = PdfReader(abs_path)
+            _first_page_text = _reader.pages[0].extract_text() or ""
+            if "檢測報告" in _first_page_text:
+                print(f"\n[SKIP-LEGACY-ZH] Excerpt PDF for '{app_name}' is in legacy Chinese format. Skipping until regenerated to English.")
+                continue
+        except Exception as _e:
+            print(f"    [WARN] Unable to inspect language for '{abs_path}': {_e}")
+
         attachment_paths = [abs_path]
 
         print(f"\n--- [{dispatched_count + 1}/{args.limit}] Processing App: {app_name} (ID: {app_id}) ---")
