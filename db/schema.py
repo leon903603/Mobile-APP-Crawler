@@ -66,21 +66,19 @@ def create_tables():
                 """)
 
                 # Migrate existing tables that predate the region/retries columns.
-                # ADD COLUMN IF NOT EXISTS is a no-op when the column already exists,
-                # so this is safe to run on every startup.
                 cur.execute("""
                     ALTER TABLE crawl_tasks
                         ADD COLUMN IF NOT EXISTS region     TEXT        NOT NULL DEFAULT 'default',
                         ADD COLUMN IF NOT EXISTS retries    INTEGER     NOT NULL DEFAULT 0,
                         ADD COLUMN IF NOT EXISTS last_error TEXT,
-                        ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW()
+                        ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW();
                 """)
 
                 # Partial index — only covers pending rows, stays small as tasks are consumed
                 cur.execute("""
                     CREATE INDEX IF NOT EXISTS idx_crawl_tasks_queue
                         ON crawl_tasks (source, region, status, id)
-                        WHERE status = 'pending'
+                        WHERE status = 'pending';
                 """)
 
                 cur.execute("""
@@ -92,6 +90,7 @@ def create_tables():
                         report_path  TEXT,
                         excerpt_path TEXT,
                         status       TEXT        NOT NULL DEFAULT 'pending',  -- pending / running / done / dead
+                        priority     INTEGER     NOT NULL DEFAULT 0,
                         retries      INTEGER     NOT NULL DEFAULT 0,
                         last_error   TEXT,
                         locked_at    TIMESTAMPTZ,
@@ -114,15 +113,29 @@ def create_tables():
                     )
                 """)
 
+                # Schema migrations for popularity and priority
                 cur.execute("""
-                    CREATE INDEX IF NOT EXISTS idx_scan_reports_queue
-                        ON scan_reports (status, id)
-                        WHERE status = 'pending'
+                    ALTER TABLE apps
+                        ADD COLUMN IF NOT EXISTS min_installs   BIGINT  DEFAULT 0,
+                        ADD COLUMN IF NOT EXISTS score          NUMERIC(3,2),
+                        ADD COLUMN IF NOT EXISTS ratings_count  BIGINT  DEFAULT 0;
+                """)
+
+                cur.execute("""
+                    ALTER TABLE scan_reports
+                        ADD COLUMN IF NOT EXISTS priority INTEGER NOT NULL DEFAULT 0;
+                """)
+
+                cur.execute("""
+                    DROP INDEX IF EXISTS idx_scan_reports_queue;
+                    CREATE INDEX IF NOT EXISTS idx_scan_reports_priority
+                        ON scan_reports (status, priority DESC, id ASC)
+                        WHERE status = 'pending';
                 """)
 
                 cur.execute("""
                     CREATE INDEX IF NOT EXISTS idx_email_log_lookup
-                        ON email_log (email, scan_report_id, status)
+                        ON email_log (email, scan_report_id, status);
                 """)
 
                 conn.commit()

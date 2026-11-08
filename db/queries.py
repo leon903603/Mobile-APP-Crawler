@@ -32,22 +32,30 @@ def insert_app(
     app_name: str,
     category: str,
     country: str = None,
+    min_installs: int = 0,
+    score: float = None,
+    ratings_count: int = 0,
 ) -> int:
     with get_connection() as conn:
         with conn.cursor() as cur:
             cur.execute("""
-                INSERT INTO apps (developer_id, store, app_id, app_name, category, country)
-                VALUES (%s, %s, %s, %s, %s, %s)
+                INSERT INTO apps (developer_id, store, app_id, app_name, category, country,
+                                  min_installs, score, ratings_count)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT (store, app_id) DO UPDATE SET
-                    app_name = EXCLUDED.app_name,
-                    category = CASE
+                    app_name      = EXCLUDED.app_name,
+                    category      = CASE
                         WHEN apps.category IS NULL OR apps.category = 'Unknown'
                         THEN EXCLUDED.category
                         ELSE apps.category
                     END,
-                    country  = EXCLUDED.country
+                    country       = COALESCE(EXCLUDED.country, apps.country),
+                    min_installs  = GREATEST(COALESCE(EXCLUDED.min_installs, 0), COALESCE(apps.min_installs, 0)),
+                    score         = COALESCE(EXCLUDED.score, apps.score),
+                    ratings_count = GREATEST(COALESCE(EXCLUDED.ratings_count, 0), COALESCE(apps.ratings_count, 0))
                 RETURNING id
-            """, (developer_id, store, app_id, app_name, category, country))
+            """, (developer_id, store, app_id, app_name, category, country,
+                  min_installs, score, ratings_count))
             row = cur.fetchone()[0]
             conn.commit()
     return row
