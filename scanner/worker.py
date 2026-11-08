@@ -27,28 +27,6 @@ DETECTION_API = os.environ.get("DETECTION_API", "http://172.27.0.19:5001/analyze
 PDF_API = os.environ.get("PDF_API", "http://172.27.0.14:8080/api/report")
 FRIDA_RESULT_JSON = os.environ.get("FRIDA_RESULT_JSON", "")
 
-_EN_RULES_CACHE = None
-
-def _load_english_rules() -> dict:
-    """載入官方英文版資安基準規則字典，覆蓋中文規則標題與敘述"""
-    global _EN_RULES_CACHE
-    if _EN_RULES_CACHE is not None:
-        return _EN_RULES_CACHE
-
-    candidates = [
-        os.path.join(os.path.dirname(os.path.abspath(__file__)), "android_static_en.json"),
-        "/home/islab/CMAA-Astatic-Production/android_static_en.json",
-    ]
-    for path in candidates:
-        if os.path.exists(path):
-            try:
-                with open(path, "r", encoding="utf-8") as f:
-                    _EN_RULES_CACHE = json.load(f)
-                    print(f"[SCANNER] Loaded {len(_EN_RULES_CACHE)} English security rules from {path}")
-                    return _EN_RULES_CACHE
-            except Exception as e:
-                print(f"[WARN] Failed to load English rules from {path}: {e}")
-    return {}
 
 def run_detection(apk_path: str, app_name: str | None = None) -> str | None:
     """
@@ -122,24 +100,13 @@ def run_detection(apk_path: str, app_name: str | None = None) -> str | None:
 
         # 4. 資料清洗與英文國際化：
         #    a. 使用爬蟲乾淨資料覆蓋底層反編譯亂碼 (~)^ 等)
-        #    b. 強制設定 lang = 'en'，注入英文規則標題與敘述，確保產出全英文 PDF 報告
+        #    b. 強制設定 lang = 'en'，確保產出全英文 PDF 報告
         clean_basename = os.path.basename(apk_path)
         clean_name = app_name or os.path.splitext(clean_basename)[0]
 
         if report_data and isinstance(report_data, dict):
             # 強制指定英文語系，不生成中文報告
             report_data["lang"] = "en"
-
-            # 注入官方英文規則字典
-            en_rules = _load_english_rules()
-            if en_rules:
-                current_rules = report_data.get("rule", {})
-                for r_key, r_val in en_rules.items():
-                    if r_key in current_rules:
-                        current_rules[r_key].update(r_val)
-                    else:
-                        current_rules[r_key] = r_val
-                report_data["rule"] = current_rules
 
             for section in ("system", "result"):
                 if section in report_data and isinstance(report_data[section], dict):
